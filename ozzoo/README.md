@@ -29,6 +29,8 @@ random events (heatwaves, disease outbreaks, generous donors) keep you on your t
 
 - **Python** 3.10 or higher (uses `match` statement syntax indirectly via type hints)
 - No third-party dependencies — the entire project uses the Python standard library.
+- **GUI only:** `tkinter` (included with the standard Python installer on Windows and macOS;
+  on Debian/Ubuntu run `sudo apt-get install python3-tk`)
 
 ### Installation
 
@@ -37,8 +39,11 @@ random events (heatwaves, disease outbreaks, generous donors) keep you on your t
 git clone https://github.com/MananSharma001/MananSharma001.git
 cd MananSharma001/ozzoo
 
-# Run the game
+# Run the game (CLI)
 python main.py
+
+# Run the game (GUI)
+python main.py --gui
 ```
 
 ---
@@ -49,12 +54,50 @@ python main.py
 
 ```bash
 cd ozzoo
+
+# CLI mode (text menus)
 python main.py
+
+# GUI mode (tkinter window)
+python main.py --gui
 ```
+
+### Graphical Interface (GUI)
+
+OzZoo ships with a full **tkinter GUI** that you can launch with:
+
+```bash
+python main.py --gui
+```
+
+The GUI provides:
+
+| Tab | What you can do |
+|---|---|
+| 🐾 **Animals** | View all animals (health colour-coded), feed, medicate, buy, move to enclosure, make perform |
+| 🏠 **Enclosures** | View cleanliness (colour-coded), clean, upgrade, build new enclosure |
+| 🛒 **Resources** | View food & medicine stock, buy food, buy medicine |
+| 💰 **Finances** | Full financial report, set ticket price, view income / expense breakdown |
+| 📋 **Event Log** | See all zoo events from the current session |
+
+**Footer controls (always visible):**
+
+- **Advance Day ➜** — simulate one full day (visitors arrive, animals tick, random events fire); a popup shows the daily report
+- **Save Game** — save to `ozzoo_save.json`
+- **Load Game** — restore from `ozzoo_save.json`
+- **Quit** — exit with confirmation
 
 ### Running in VS Code
 
 > **TL;DR** — open the repo folder in VS Code, install the Python extension, then press **F5**.
+
+Three launch configurations are provided in `.vscode/launch.json`:
+
+| Config name | What it does |
+|---|---|
+| **Run OzZoo (CLI)** | Opens the text-menu game in the integrated terminal |
+| **Run OzZoo (GUI)** | Opens the tkinter GUI window |
+| **Run OzZoo (CLI + debugger)** | CLI with full debugger support |
 
 #### Step-by-step
 
@@ -75,23 +118,18 @@ python main.py
 4. **Select a Python interpreter** — press `Ctrl+Shift+P`, type
    `Python: Select Interpreter`, and choose **Python 3.10** or higher.
 
-5. **Run the game** — press **F5** (or open the *Run and Debug* panel with `Ctrl+Shift+D` and
-   click the green ▶ button next to **"Run OzZoo"**).
-
-   The game opens in VS Code's **integrated terminal** at the bottom of the screen.
-   Type menu numbers and press **Enter** to play.
+5. **Run the game** — press `Ctrl+Shift+D` to open the *Run and Debug* panel, choose
+   **"Run OzZoo (GUI)"** from the dropdown, then press **F5**.
 
 #### Manual terminal inside VS Code
 
-If you prefer typing commands yourself:
+```bash
+# CLI
+python main.py
 
-1. Open the integrated terminal: **Terminal → New Terminal** (or `` Ctrl+` ``).
-2. The terminal automatically opens in the `ozzoo/` directory (configured in `.vscode/settings.json`).
-3. Run:
-
-   ```bash
-   python main.py
-   ```
+# GUI
+python main.py --gui
+```
 
 #### Troubleshooting
 
@@ -99,7 +137,8 @@ If you prefer typing commands yourself:
 |---|---|
 | `ModuleNotFoundError` | Make sure VS Code opened the **repository root** folder (the one that contains `ozzoo/` and `.vscode/`), not the `ozzoo` sub-folder directly. |
 | `python: command not found` | Use `python3 main.py` instead, or set `"python.defaultInterpreterPath"` in `.vscode/settings.json`. |
-| Input not working in Debug Console | The game uses stdin — always run with **F5** (which uses the integrated terminal), not *Run Without Debugging* via the Debug Console. |
+| `No module named 'tkinter'` | Install tkinter: `sudo apt-get install python3-tk` (Linux) or reinstall Python with the standard installer (Windows/macOS). |
+| Input not working in Debug Console | The CLI uses stdin — always run with **F5** in the integrated terminal config. |
 | `SyntaxError` / wrong Python version | OzZoo requires **Python 3.10+**. Check your version with `python --version`. |
 
 ---

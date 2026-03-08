@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run OzZoo",
+      "name": "Run OzZoo (CLI)",
       "type": "debugpy",
       "request": "launch",
       // Point directly at the entry-point file inside the ozzoo/ folder.
@@ -17,7 +17,18 @@
       "justMyCode": true
     },
     {
-      "name": "Run OzZoo (with debugger)",
+      "name": "Run OzZoo (GUI)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ozzoo/main.py",
+      "args": ["--gui"],
+      "cwd": "${workspaceFolder}/ozzoo",
+      // The GUI uses tkinter — it opens its own window, so internalConsole is fine.
+      "console": "internalConsole",
+      "justMyCode": true
+    },
+    {
+      "name": "Run OzZoo (CLI + debugger)",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/ozzoo/main.py",

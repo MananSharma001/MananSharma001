@@ -929,6 +929,30 @@ class Zoo:
             "medicine": self._medicine.to_dict(),
         }
 
+    def from_dict(self, data: dict) -> None:
+        """
+        Restore minimal zoo state from a plain dict (from JSON).
+
+        Only the fields serialised by :meth:`to_dict` are restored.
+        Animal and enclosure objects are *not* round-tripped — the zoo
+        resets to its default starting state (same as a fresh ``__init__``)
+        with statistics, finances, food, and medicine overwritten by the
+        saved values.
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary previously produced by :meth:`to_dict`.
+        """
+        self._day            = data.get("day", 0)
+        self._ticket_price   = data.get("ticket_price", self.DEFAULT_TICKET_PRICE)
+        self._score          = data.get("score", 0)
+        self._total_visitors = data.get("total_visitors", 0)
+        self._animals_born   = data.get("animals_born", 0)
+        self._animals_died   = data.get("animals_died", 0)
+        self._food.from_dict(data.get("food", {}))
+        self._medicine.from_dict(data.get("medicine", {}))
+
     # ------------------------------------------------------------------
     # Accessors for CLI
     # ------------------------------------------------------------------

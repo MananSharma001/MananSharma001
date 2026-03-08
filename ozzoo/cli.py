@@ -558,14 +558,7 @@ class CLI:
 
             # Rebuild the zoo — minimal state restore
             self._zoo = Zoo(name=data.get("name", "OzZoo"))
-            self._zoo._day = data.get("day", 0)
-            self._zoo._ticket_price = data.get("ticket_price", 25.0)
-            self._zoo._score = data.get("score", 0)
-            self._zoo._total_visitors = data.get("total_visitors", 0)
-            self._zoo._animals_born = data.get("animals_born", 0)
-            self._zoo._animals_died = data.get("animals_died", 0)
-            self._zoo._food.from_dict(data.get("food", {}))
-            self._zoo._medicine.from_dict(data.get("medicine", {}))
+            self._zoo.from_dict(data)
             self._game_loop = GameLoop(self._zoo)
             print(f"  ✅ Game loaded from '{SAVE_FILE}'.")
         except Exception as e:

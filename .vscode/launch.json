@@ -1,0 +1,41 @@
+{
+  // Launch configurations for the OzZoo Zoo Simulation project.
+  // Press F5 (or click the green play button in the Run & Debug panel) to start the game.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run OzZoo (CLI)",
+      "type": "debugpy",
+      "request": "launch",
+      // Point directly at the entry-point file inside the ozzoo/ folder.
+      "program": "${workspaceFolder}/ozzoo/main.py",
+      // Run inside the ozzoo/ directory so all relative imports resolve correctly.
+      "cwd": "${workspaceFolder}/ozzoo",
+      // The game is interactive — it reads from stdin — so it MUST run in the
+      // integrated terminal (not the Debug Console).
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Run OzZoo (GUI)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ozzoo/main.py",
+      "args": ["--gui"],
+      "cwd": "${workspaceFolder}/ozzoo",
+      // The GUI uses tkinter — it opens its own window, so internalConsole is fine.
+      "console": "internalConsole",
+      "justMyCode": true
+    },
+    {
+      "name": "Run OzZoo (CLI + debugger)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ozzoo/main.py",
+      "cwd": "${workspaceFolder}/ozzoo",
+      // integratedTerminal lets you type input even when the debugger is attached.
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

@@ -45,10 +45,62 @@ python main.py
 
 ## How to Run
 
+### Terminal / Command Prompt
+
 ```bash
 cd ozzoo
 python main.py
 ```
+
+### Running in VS Code
+
+> **TL;DR** — open the repo folder in VS Code, install the Python extension, then press **F5**.
+
+#### Step-by-step
+
+1. **Install VS Code** — download from <https://code.visualstudio.com/> if you haven't already.
+
+2. **Open the project folder** in VS Code:
+
+   ```
+   File → Open Folder → select the repository root folder
+   ```
+
+   *(The folder that contains `ozzoo/` and `.vscode/`.)*
+
+3. **Install the Python extension** — VS Code will show a pop-up:
+   *"Do you want to install the recommended extensions?"* → click **Install**.
+   If the pop-up doesn't appear, press `Ctrl+Shift+X`, search for **Python** (by Microsoft) and install it.
+
+4. **Select a Python interpreter** — press `Ctrl+Shift+P`, type
+   `Python: Select Interpreter`, and choose **Python 3.10** or higher.
+
+5. **Run the game** — press **F5** (or open the *Run and Debug* panel with `Ctrl+Shift+D` and
+   click the green ▶ button next to **"Run OzZoo"**).
+
+   The game opens in VS Code's **integrated terminal** at the bottom of the screen.
+   Type menu numbers and press **Enter** to play.
+
+#### Manual terminal inside VS Code
+
+If you prefer typing commands yourself:
+
+1. Open the integrated terminal: **Terminal → New Terminal** (or `` Ctrl+` ``).
+2. The terminal automatically opens in the `ozzoo/` directory (configured in `.vscode/settings.json`).
+3. Run:
+
+   ```bash
+   python main.py
+   ```
+
+#### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `ModuleNotFoundError` | Make sure VS Code opened the **repository root** folder (the one that contains `ozzoo/` and `.vscode/`), not the `ozzoo` sub-folder directly. |
+| `python: command not found` | Use `python3 main.py` instead, or set `"python.defaultInterpreterPath"` in `.vscode/settings.json`. |
+| Input not working in Debug Console | The game uses stdin — always run with **F5** (which uses the integrated terminal), not *Run Without Debugging* via the Debug Console. |
+| `SyntaxError` / wrong Python version | OzZoo requires **Python 3.10+**. Check your version with `python --version`. |
 
 ---
 

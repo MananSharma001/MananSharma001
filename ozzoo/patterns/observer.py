@@ -300,6 +300,18 @@ class EventLogger(Observer):
             for e in recent
         ]
 
+    def get_all_entries(self) -> List[Dict[str, Any]]:
+        """
+        Return a copy of all raw log entries.
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            List of dicts with keys ``"timestamp"``, ``"event_type"``,
+            and ``"data"``.
+        """
+        return list(self._log)
+
     def clear(self) -> None:
         """Clear all log entries."""
         self._log.clear()

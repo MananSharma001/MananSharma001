@@ -206,6 +206,19 @@ class Finance:
             + "=" * 50
         )
 
+    def get_recent_ledger(self, n: int = 20) -> tuple[list, list]:
+        """
+        Return the *n* most recent income and expense ledger entries.
+
+        Returns
+        -------
+        tuple[list, list]
+            ``(income_entries, expense_entries)`` where each entry is a
+            ``(timestamp, amount, category, description)`` tuple.
+        """
+        return (list(self._income_ledger[-n:]),
+                list(self._expense_ledger[-n:]))
+
     def get_income_by_source(self) -> Dict[str, float]:
         """
         Return a dict aggregating total income per source.

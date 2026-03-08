@@ -1,7 +1,7 @@
 """
 gui.py
 ======
-Tkinter-based graphical user interface for the OzZoo Zoo Simulation.
+Tkinter graphical interface for the OzZoo Zoo Simulation — enhanced edition.
 
 Launch via::
 
@@ -11,22 +11,17 @@ or directly::
 
     python gui.py
 
-The GUI offers the same features as the CLI:
-
-* View and manage animals (feed, medicate, move, buy, make perform)
-* Manage enclosures (view, clean, upgrade, build)
-* Manage resources (food and medicine inventory, purchasing)
-* Manage finances (report, ticket price, income/expense breakdown)
-* Advance the simulation by one day with a detailed daily report
-* Save and load game state
-
-Design notes
-------------
-* Uses **only the Python standard library** (tkinter) — no third-party packages.
-* The Zoo/GameLoop objects are the exact same ones used by the CLI; the GUI
-  is purely a different presentation layer.
-* All zoo mutations go through the same ``Zoo`` public methods, so game logic
-  is untouched.
+Features
+--------
+* **Dashboard** — live KPI tiles (Balance, Day, Animals, Score) + canvas welfare meters
+* **Animals tab** — sortable treeview + right-side detail panel with canvas stat bars
+* **Enclosures tab** — treeview + cleanliness / occupancy detail panel
+* **Resources tab** — canvas progress bars per food / medicine type; inline buy buttons
+* **Finances tab** — three KPI tiles + scrollable ledger treeview
+* **Event Log** — color-coded by event type using Text tags
+* **Styled dialogs** — every input uses a themed Toplevel (no plain simpledialog)
+* **Auto-refresh** — header & dashboard update every 3 s automatically
+* No third-party dependencies — stdlib tkinter only.
 """
 
 from __future__ import annotations
@@ -37,11 +32,8 @@ import sys
 from typing import Optional
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
-# ---------------------------------------------------------------------------
-# Ensure the ozzoo package directory is importable when run directly.
-# ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(__file__))
 
 from zoo import Zoo                          # noqa: E402
@@ -53,23 +45,48 @@ from exceptions import OzZooException        # noqa: E402
 SAVE_FILE = "ozzoo_save.json"
 
 # ---------------------------------------------------------------------------
-# Colour palette — dark Australian-outback theme
+# Colour palette
 # ---------------------------------------------------------------------------
-_BG      = "#1c1c2e"   # deep navy background
-_PANEL   = "#16213e"   # slightly lighter panels / text-areas
-_ACCENT  = "#0f3460"   # mid-blue accent (header / footer)
-_GOLD    = "#f5a623"   # gold headings & highlights
-_FG      = "#dde1e7"   # main foreground text
-_BTN_RED = "#e94560"   # action / destructive buttons
-_BTN_BLU = "#0f3460"   # neutral / secondary buttons
-_GREEN   = "#4caf50"
-_ORANGE  = "#ff9800"
-_RED     = "#f44336"
-_TROUGH  = "#2a2a4a"   # scrollbar trough
+_BG      = "#1a1a2e"
+_PANEL   = "#16213e"
+_CARD    = "#0d2137"
+_ACCENT  = "#0f3460"
+_GOLD    = "#f5a623"
+_FG      = "#dde1e7"
+_FG2     = "#8891a4"
+_BTN_RED = "#e94560"
+_BTN_BLU = "#1565c0"
+_GREEN   = "#43a047"
+_ORANGE  = "#fb8c00"
+_RED     = "#e53935"
+_CYAN    = "#00acc1"
+_PURPLE  = "#8e24aa"
+_YELLOW  = "#f9a825"
+_TROUGH  = "#2a2a4a"
 
+# Event-log tag colours
+_TAG_BIRTH   = "#69f0ae"
+_TAG_DEATH   = "#ff1744"
+_TAG_WELFARE = "#e53935"
+_TAG_FINANCE = "#43a047"
+_TAG_RANDOM  = "#f9a825"
+_TAG_HABITAT = "#00acc1"
+
+FONT_TITLE  = ("Helvetica", 16, "bold")
+FONT_HEAD   = ("Helvetica", 12, "bold")
+FONT_BODY   = ("Helvetica", 10)
+FONT_SMALL  = ("Helvetica", 9)
+FONT_BOLD9  = ("Helvetica", 9, "bold")
+FONT_MONO   = ("Courier", 9)
+FONT_KPI    = ("Helvetica", 26, "bold")
+FONT_KPI_LB = ("Helvetica", 9)
+
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
 
 def _health_color(value: int) -> str:
-    """Map a 0-100 value (health, happiness, cleanliness) to a colour."""
     if value >= 70:
         return _GREEN
     if value >= 30:
@@ -77,217 +94,305 @@ def _health_color(value: int) -> str:
     return _RED
 
 
-# ---------------------------------------------------------------------------
-# Reusable widget helpers
-# ---------------------------------------------------------------------------
-
-def _btn(parent: tk.Widget, text: str, cmd, bg: str = _BTN_BLU, **kw) -> tk.Button:
-    """Create a styled button."""
+def _btn(parent, text, cmd, bg=_BTN_BLU, fg=_FG, **kw):
     return tk.Button(
-        parent,
-        text=text,
-        command=cmd,
-        bg=bg,
-        fg=_FG,
-        activebackground=_GOLD,
-        activeforeground="#000",
-        relief="flat",
-        padx=10,
-        pady=4,
-        font=("Helvetica", 9, "bold"),
-        cursor="hand2",
-        **kw,
+        parent, text=text, command=cmd,
+        bg=bg, fg=fg,
+        activebackground=_GOLD, activeforeground="#000",
+        relief="flat", padx=10, pady=5,
+        font=FONT_BOLD9, cursor="hand2", **kw,
     )
 
 
-def _text_area(parent: tk.Widget, **kw) -> tk.Text:
-    """Create a styled Text widget (disabled by default)."""
-    kw.setdefault("state", "disabled")
-    return tk.Text(
-        parent,
-        bg=_PANEL,
-        fg=_FG,
-        insertbackground=_FG,
-        relief="flat",
-        font=("Courier", 9),
-        **kw,
-    )
+# ---------------------------------------------------------------------------
+# Reusable composite widgets
+# ---------------------------------------------------------------------------
+
+class _CanvasBar(tk.Canvas):
+    """Horizontal filled-bar progress meter drawn on a Canvas."""
+
+    HEIGHT = 16
+    RADIUS = 6
+
+    def __init__(self, parent, max_val: int = 100,
+                 color: str = _GREEN, bg: str = _PANEL, **kw):
+        super().__init__(parent, height=self.HEIGHT,
+                         bg=bg, highlightthickness=0, **kw)
+        self._max   = max_val
+        self._color = color
+        self._val   = 0
+        self.bind("<Configure>", lambda _e: self._draw())
+
+    def set_value(self, val: int, color: str = "") -> None:
+        self._val   = max(0, min(self._max, val))
+        if color:
+            self._color = color
+        self._draw()
+
+    def _draw(self) -> None:
+        self.delete("all")
+        w = self.winfo_width() or 200
+        h = self.HEIGHT
+        r = self.RADIUS
+        self._rrect(0, 0, w, h, r, fill=_TROUGH)
+        fill_w = int(w * self._val / self._max) if self._max else 0
+        if fill_w > r * 2:
+            self._rrect(0, 0, fill_w, h, r, fill=self._color)
+        self.create_text(w // 2, h // 2,
+                         text=f"{self._val}/{self._max}",
+                         fill=_FG, font=FONT_SMALL, anchor="center")
+
+    def _rrect(self, x1, y1, x2, y2, r, **kw):
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
+               x2, y2-r, x2, y2, x2-r, y2, x1+r, y2,
+               x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        self.create_polygon(pts, smooth=True, **kw)
 
 
-def _write_text(widget: tk.Text, content: str) -> None:
-    """Replace all text in a disabled Text widget."""
-    widget.configure(state="normal")
-    widget.delete("1.0", "end")
-    widget.insert("end", content)
-    widget.configure(state="disabled")
+class _KpiTile(tk.Frame):
+    """Compact KPI card: big number + unit label."""
+
+    def __init__(self, parent, label: str, unit: str = "",
+                 color: str = _GOLD, **kw):
+        super().__init__(parent, bg=_CARD, padx=18, pady=12, **kw)
+        self._val_var = tk.StringVar(value="—")
+        tk.Label(self, text=label, bg=_CARD, fg=_FG2,
+                 font=FONT_KPI_LB).pack(anchor="w")
+        row = tk.Frame(self, bg=_CARD)
+        row.pack(anchor="w")
+        tk.Label(row, textvariable=self._val_var, bg=_CARD,
+                 fg=color, font=FONT_KPI).pack(side="left")
+        if unit:
+            tk.Label(row, text=f" {unit}", bg=_CARD,
+                     fg=_FG2, font=FONT_BODY).pack(side="left", pady=(8, 0))
+
+    def set(self, value) -> None:
+        self._val_var.set(str(value))
+
+
+class _StatRow(tk.Frame):
+    """Label + canvas bar on one horizontal row."""
+
+    def __init__(self, parent, label: str, max_val: int = 100,
+                 color: str = _GREEN, **kw):
+        super().__init__(parent, bg=_CARD, **kw)
+        tk.Label(self, text=label, width=12, anchor="e",
+                 bg=_CARD, fg=_FG, font=FONT_SMALL).pack(side="left")
+        self._bar = _CanvasBar(self, max_val=max_val, color=color, bg=_CARD)
+        self._bar.pack(side="left", fill="x", expand=True, padx=(6, 4))
+
+    def set_value(self, val: int, color: str = "") -> None:
+        self._bar.set_value(val, color)
 
 
 # ---------------------------------------------------------------------------
-# Modal dialog classes
+# Styled dialog classes  (no plain simpledialog)
 # ---------------------------------------------------------------------------
 
-class _BuyAnimalDialog(tk.Toplevel):
-    """Modal dialog for purchasing a new animal."""
+class _BaseDialog(tk.Toplevel):
+    """Common styling and helpers for all input dialogs."""
 
-    def __init__(self, parent: tk.Widget) -> None:
+    def __init__(self, parent, title: str):
         super().__init__(parent)
-        self.title("Buy New Animal")
+        self.title(title)
         self.configure(bg=_BG)
         self.resizable(False, False)
         self.grab_set()
-        self.result: Optional[tuple] = None  # (species, name, age)
+        self.result = None
 
+    def _title_label(self, text: str, cols: int = 2) -> None:
+        tk.Label(self, text=text, bg=_BG, fg=_GOLD, font=FONT_HEAD).grid(
+            row=0, column=0, columnspan=cols, pady=(16, 10), padx=20)
+
+    def _field(self, label: str, row: int) -> None:
+        tk.Label(self, text=label, bg=_BG, fg=_FG, font=FONT_BODY).grid(
+            row=row, column=0, sticky="e", padx=10, pady=5)
+
+    def _btn_row(self, ok_text: str, ok_cmd, row: int, cols: int = 2) -> None:
+        f = tk.Frame(self, bg=_BG)
+        f.grid(row=row, column=0, columnspan=cols, pady=14)
+        _btn(f, ok_text, ok_cmd, bg=_BTN_RED).pack(side="left", padx=8)
+        _btn(f, "Cancel", self.destroy, bg=_BTN_BLU).pack(side="left", padx=8)
+
+
+class _BuyAnimalDialog(_BaseDialog):
+    def __init__(self, parent):
+        super().__init__(parent, "Buy New Animal")
         species_list = AnimalFactory.supported_species()
+        self._title_label("🐾  Buy New Animal")
 
-        tk.Label(self, text="Buy New Animal 🐾", bg=_BG, fg=_GOLD,
-                 font=("Helvetica", 13, "bold")).grid(
-            row=0, column=0, columnspan=2, pady=(14, 8), padx=20)
-
-        tk.Label(self, text="Species:", bg=_BG, fg=_FG).grid(
-            row=1, column=0, sticky="e", padx=10, pady=4)
+        self._field("Species:", 1)
         self._species_var = tk.StringVar(value=species_list[0])
-        ttk.Combobox(self, textvariable=self._species_var, values=species_list,
-                     state="readonly", width=20).grid(row=1, column=1, padx=10, pady=4)
+        ttk.Combobox(self, textvariable=self._species_var,
+                     values=species_list, state="readonly", width=22).grid(
+            row=1, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Name:", bg=_BG, fg=_FG).grid(
-            row=2, column=0, sticky="e", padx=10, pady=4)
+        self._field("Name:", 2)
         self._name_var = tk.StringVar()
         tk.Entry(self, textvariable=self._name_var, bg=_PANEL, fg=_FG,
-                 insertbackground=_FG, width=22).grid(row=2, column=1, padx=10, pady=4)
+                 insertbackground=_FG, width=24).grid(row=2, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Age (years):", bg=_BG, fg=_FG).grid(
-            row=3, column=0, sticky="e", padx=10, pady=4)
+        self._field("Age (years):", 3)
         self._age_var = tk.IntVar(value=2)
         tk.Spinbox(self, from_=0, to=30, textvariable=self._age_var,
                    bg=_PANEL, fg=_FG, width=8).grid(
-            row=3, column=1, sticky="w", padx=10, pady=4)
+            row=3, column=1, sticky="w", padx=10, pady=5)
 
-        btn_row = tk.Frame(self, bg=_BG)
-        btn_row.grid(row=4, column=0, columnspan=2, pady=14)
-        _btn(btn_row, "Buy", self._ok, bg=_BTN_RED).pack(side="left", padx=8)
-        _btn(btn_row, "Cancel", self.destroy).pack(side="left", padx=8)
-
+        self._btn_row("🛒  Buy", self._ok, 4)
         self.wait_window()
 
-    def _ok(self) -> None:
+    def _ok(self):
         name = self._name_var.get().strip()
         if not name:
-            messagebox.showerror("Input Error", "Please enter an animal name.",
-                                 parent=self)
+            messagebox.showerror("Input Error", "Please enter a name.", parent=self)
             return
         self.result = (self._species_var.get(), name, self._age_var.get())
         self.destroy()
 
 
-class _MoveAnimalDialog(tk.Toplevel):
-    """Modal dialog for moving an animal to a different enclosure."""
+class _MoveAnimalDialog(_BaseDialog):
+    def __init__(self, parent, zoo: Zoo):
+        super().__init__(parent, "Move Animal")
+        self._title_label("🏠  Move Animal to Enclosure")
 
-    def __init__(self, parent: tk.Widget, zoo: Zoo) -> None:
-        super().__init__(parent)
-        self.title("Move Animal")
-        self.configure(bg=_BG)
-        self.resizable(False, False)
-        self.grab_set()
-        self.result: Optional[tuple] = None  # (animal_name, enclosure_id)
+        names = [a.name for a in zoo.get_alive_animals()]
+        self._enc_ids    = [e.enclosure_id for e in zoo.enclosures]
+        self._enc_labels = [f"{e.enclosure_id} — {e.name} ({e.habitat_type})"
+                            for e in zoo.enclosures]
 
-        animal_names = [a.name for a in zoo.get_alive_animals()]
-        enc_labels   = [f"{e.enclosure_id} — {e.name} ({e.habitat_type})"
-                        for e in zoo.enclosures]
-        self._enc_ids     = [e.enclosure_id for e in zoo.enclosures]
-        self._enc_labels  = enc_labels
+        self._field("Animal:", 1)
+        self._animal_var = tk.StringVar(value=names[0] if names else "")
+        ttk.Combobox(self, textvariable=self._animal_var, values=names,
+                     state="readonly", width=26).grid(row=1, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Move Animal 🏠", bg=_BG, fg=_GOLD,
-                 font=("Helvetica", 13, "bold")).grid(
-            row=0, column=0, columnspan=2, pady=(14, 8), padx=20)
+        self._field("To Enclosure:", 2)
+        self._enc_var = tk.StringVar(
+            value=self._enc_labels[0] if self._enc_labels else "")
+        ttk.Combobox(self, textvariable=self._enc_var, values=self._enc_labels,
+                     state="readonly", width=32).grid(row=2, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Animal:", bg=_BG, fg=_FG).grid(
-            row=1, column=0, sticky="e", padx=10, pady=4)
-        self._animal_var = tk.StringVar(value=animal_names[0] if animal_names else "")
-        ttk.Combobox(self, textvariable=self._animal_var, values=animal_names,
-                     state="readonly", width=24).grid(row=1, column=1, padx=10, pady=4)
-
-        tk.Label(self, text="To Enclosure:", bg=_BG, fg=_FG).grid(
-            row=2, column=0, sticky="e", padx=10, pady=4)
-        self._enc_var = tk.StringVar(value=enc_labels[0] if enc_labels else "")
-        ttk.Combobox(self, textvariable=self._enc_var, values=enc_labels,
-                     state="readonly", width=30).grid(row=2, column=1, padx=10, pady=4)
-
-        btn_row = tk.Frame(self, bg=_BG)
-        btn_row.grid(row=3, column=0, columnspan=2, pady=14)
-        _btn(btn_row, "Move", self._ok, bg=_BTN_RED).pack(side="left", padx=8)
-        _btn(btn_row, "Cancel", self.destroy).pack(side="left", padx=8)
-
+        self._btn_row("Move", self._ok, 3)
         self.wait_window()
 
-    def _ok(self) -> None:
-        animal_name = self._animal_var.get()
-        enc_label   = self._enc_var.get()
-        if not animal_name or not enc_label:
+    def _ok(self):
+        al = self._animal_var.get()
+        el = self._enc_var.get()
+        if not al or not el:
             return
-        idx    = self._enc_labels.index(enc_label) if enc_label in self._enc_labels else 0
-        enc_id = self._enc_ids[idx]
-        self.result = (animal_name, enc_id)
+        idx = self._enc_labels.index(el) if el in self._enc_labels else 0
+        self.result = (al, self._enc_ids[idx])
         self.destroy()
 
 
-class _BuildEnclosureDialog(tk.Toplevel):
-    """Modal dialog for building a new enclosure."""
+class _BuildEnclosureDialog(_BaseDialog):
+    HABITATS = ["Savannah", "Arctic", "Wetlands", "Forest", "Desert", "Ocean"]
 
-    HABITAT_TYPES = ["Savannah", "Arctic", "Wetlands", "Forest", "Desert", "Ocean"]
+    def __init__(self, parent):
+        super().__init__(parent, "Build New Enclosure")
+        self._title_label("🏗️  Build New Enclosure")
 
-    def __init__(self, parent: tk.Widget) -> None:
-        super().__init__(parent)
-        self.title("Build New Enclosure")
-        self.configure(bg=_BG)
-        self.resizable(False, False)
-        self.grab_set()
-        self.result: Optional[tuple] = None  # (name, habitat, capacity, area)
-
-        tk.Label(self, text="Build New Enclosure 🏗️", bg=_BG, fg=_GOLD,
-                 font=("Helvetica", 13, "bold")).grid(
-            row=0, column=0, columnspan=2, pady=(14, 8), padx=20)
-
-        tk.Label(self, text="Name:", bg=_BG, fg=_FG).grid(
-            row=1, column=0, sticky="e", padx=10, pady=4)
+        self._field("Name:", 1)
         self._name_var = tk.StringVar()
         tk.Entry(self, textvariable=self._name_var, bg=_PANEL, fg=_FG,
-                 insertbackground=_FG, width=22).grid(row=1, column=1, padx=10, pady=4)
+                 insertbackground=_FG, width=24).grid(row=1, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Habitat Type:", bg=_BG, fg=_FG).grid(
-            row=2, column=0, sticky="e", padx=10, pady=4)
-        self._habitat_var = tk.StringVar(value=self.HABITAT_TYPES[0])
-        ttk.Combobox(self, textvariable=self._habitat_var, values=self.HABITAT_TYPES,
-                     state="readonly", width=20).grid(row=2, column=1, padx=10, pady=4)
+        self._field("Habitat Type:", 2)
+        self._habitat_var = tk.StringVar(value=self.HABITATS[0])
+        ttk.Combobox(self, textvariable=self._habitat_var, values=self.HABITATS,
+                     state="readonly", width=22).grid(row=2, column=1, padx=10, pady=5)
 
-        tk.Label(self, text="Max Capacity:", bg=_BG, fg=_FG).grid(
-            row=3, column=0, sticky="e", padx=10, pady=4)
+        self._field("Max Capacity:", 3)
         self._cap_var = tk.IntVar(value=5)
         tk.Spinbox(self, from_=2, to=20, textvariable=self._cap_var,
                    bg=_PANEL, fg=_FG, width=8).grid(
-            row=3, column=1, sticky="w", padx=10, pady=4)
+            row=3, column=1, sticky="w", padx=10, pady=5)
 
-        tk.Label(self, text="Area (m²):", bg=_BG, fg=_FG).grid(
-            row=4, column=0, sticky="e", padx=10, pady=4)
+        self._field("Area (m²):", 4)
         self._area_var = tk.DoubleVar(value=200.0)
         tk.Spinbox(self, from_=50, to=2000, increment=50,
                    textvariable=self._area_var, bg=_PANEL, fg=_FG, width=8).grid(
-            row=4, column=1, sticky="w", padx=10, pady=4)
+            row=4, column=1, sticky="w", padx=10, pady=5)
 
-        btn_row = tk.Frame(self, bg=_BG)
-        btn_row.grid(row=5, column=0, columnspan=2, pady=14)
-        _btn(btn_row, "Build", self._ok, bg=_BTN_RED).pack(side="left", padx=8)
-        _btn(btn_row, "Cancel", self.destroy).pack(side="left", padx=8)
-
+        self._btn_row("🏗️  Build", self._ok, 5)
         self.wait_window()
 
-    def _ok(self) -> None:
+    def _ok(self):
         name = self._name_var.get().strip()
         if not name:
-            messagebox.showerror("Input Error", "Please enter an enclosure name.",
-                                 parent=self)
+            messagebox.showerror("Input Error", "Please enter a name.", parent=self)
             return
         self.result = (name, self._habitat_var.get(),
                        self._cap_var.get(), self._area_var.get())
+        self.destroy()
+
+
+class _BuyResourceDialog(_BaseDialog):
+    """Generic dialog for buying food or medicine."""
+
+    def __init__(self, parent, resource: str, types: list[str],
+                 default_type: str, default_qty: int, max_qty: int, unit_label: str):
+        super().__init__(parent, f"Buy {resource}")
+        self._title_label(f"🛒  Buy {resource}")
+
+        self._field("Type:", 1)
+        self._type_var = tk.StringVar(value=default_type)
+        ttk.Combobox(self, textvariable=self._type_var, values=types,
+                     state="readonly", width=22).grid(row=1, column=1, padx=10, pady=5)
+
+        self._field(f"{unit_label}:", 2)
+        self._qty_var = tk.IntVar(value=default_qty)
+        tk.Spinbox(self, from_=1, to=max_qty, textvariable=self._qty_var,
+                   bg=_PANEL, fg=_FG, width=8).grid(
+            row=2, column=1, sticky="w", padx=10, pady=5)
+
+        self._btn_row("Buy", self._ok, 3)
+        self.wait_window()
+
+    def _ok(self):
+        self.result = (self._type_var.get(), self._qty_var.get())
+        self.destroy()
+
+
+class _SetTicketDialog(_BaseDialog):
+    def __init__(self, parent, current: float):
+        super().__init__(parent, "Set Ticket Price")
+        self._title_label("🎟️  Set Ticket Price")
+
+        self._field("Current price:", 1)
+        tk.Label(self, text=f"${current:.2f} AUD", bg=_BG,
+                 fg=_GOLD, font=FONT_HEAD).grid(row=1, column=1, padx=10, pady=5)
+
+        self._field("New price ($):", 2)
+        self._price_var = tk.DoubleVar(value=current)
+        tk.Spinbox(self, from_=0.01, to=500.0, increment=1.0,
+                   format="%.2f", textvariable=self._price_var,
+                   bg=_PANEL, fg=_FG, width=10).grid(
+            row=2, column=1, sticky="w", padx=10, pady=5)
+
+        self._btn_row("Set Price", self._ok, 3)
+        self.wait_window()
+
+    def _ok(self):
+        self.result = self._price_var.get()
+        self.destroy()
+
+
+class _MedicateDialog(_BaseDialog):
+    def __init__(self, parent, animal_name: str):
+        super().__init__(parent, "Medicate Animal")
+        self._title_label(f"💊  Medicate {animal_name}")
+
+        med_types = ["antibiotic", "vitamin", "vaccine", "painkiller"]
+        self._field("Medicine:", 1)
+        self._med_var = tk.StringVar(value=med_types[0])
+        ttk.Combobox(self, textvariable=self._med_var, values=med_types,
+                     state="readonly", width=22).grid(row=1, column=1, padx=10, pady=5)
+
+        self._btn_row("Administer", self._ok, 2)
+        self.wait_window()
+
+    def _ok(self):
+        self.result = self._med_var.get()
         self.destroy()
 
 
@@ -297,96 +402,181 @@ class _BuildEnclosureDialog(tk.Toplevel):
 
 class OzZooGUI:
     """
-    Tkinter graphical interface for the OzZoo Zoo Simulation.
+    The best-possible tkinter GUI for OzZoo.
 
-    Parameters
-    ----------
-    root : tk.Tk
-        The Tk root window passed in from :func:`run_gui`.
+    Layout
+    ------
+    Header  — live stats bar (auto-refreshed every 3 s)
+    Notebook — 6 tabs:
+        📊 Dashboard  |  🐾 Animals  |  🏠 Enclosures
+        🛒 Resources  |  💰 Finances  |  📋 Event Log
+    Footer  — Advance Day | Save | Load | Quit + Score
     """
+
+    _REFRESH_MS = 3000
 
     def __init__(self, root: tk.Tk) -> None:
         self._root = root
         self._zoo  = Zoo()
         self._loop = GameLoop(self._zoo)
+        self._anim_sort_col: Optional[str] = None
+        self._anim_sort_rev: bool = False
+        self._event_lines: list[str] = []   # accumulated daily + observer events
 
         root.title("🦘  OzZoo — Australian Zoo Management")
         root.configure(bg=_BG)
-        root.minsize(940, 640)
+        root.minsize(1040, 680)
 
+        self._setup_styles()
         self._build_header()
         self._build_notebook()
         self._build_footer()
         self._refresh()
+        self._schedule_refresh()
 
     # ------------------------------------------------------------------
-    # Layout construction
+    # Style setup
+    # ------------------------------------------------------------------
+
+    def _setup_styles(self) -> None:
+        s = ttk.Style()
+        s.theme_use("clam")
+        s.configure("TNotebook", background=_BG, borderwidth=0)
+        s.configure("TNotebook.Tab", background=_ACCENT, foreground=_FG,
+                    padding=[16, 7], font=FONT_BOLD9)
+        s.map("TNotebook.Tab",
+              background=[("selected", _GOLD)],
+              foreground=[("selected", "#000")])
+        s.configure("Treeview", background=_PANEL, foreground=_FG,
+                    fieldbackground=_PANEL, rowheight=26)
+        s.configure("Treeview.Heading", background=_ACCENT, foreground=_GOLD,
+                    font=FONT_BOLD9)
+        s.map("Treeview",
+              background=[("selected", _BTN_RED)],
+              foreground=[("selected", "#fff")])
+        s.configure("TScrollbar", background=_PANEL, troughcolor=_TROUGH,
+                    arrowcolor=_FG)
+        s.configure("TCombobox", fieldbackground=_PANEL, background=_PANEL,
+                    foreground=_FG, arrowcolor=_FG)
+
+    # ------------------------------------------------------------------
+    # Header
     # ------------------------------------------------------------------
 
     def _build_header(self) -> None:
-        """Top status bar: zoo name + live stats."""
-        hdr = tk.Frame(self._root, bg=_ACCENT, pady=8)
+        hdr = tk.Frame(self._root, bg=_ACCENT, pady=10)
         hdr.pack(fill="x")
-
         tk.Label(hdr, text="🦘  OzZoo — Australian Zoo Management  🦘",
-                 bg=_ACCENT, fg=_GOLD, font=("Helvetica", 16, "bold")).pack()
-
+                 bg=_ACCENT, fg=_GOLD, font=FONT_TITLE).pack()
         self._status_var = tk.StringVar()
-        tk.Label(hdr, textvariable=self._status_var, bg=_ACCENT, fg=_FG,
-                 font=("Helvetica", 10)).pack()
+        tk.Label(hdr, textvariable=self._status_var, bg=_ACCENT,
+                 fg=_FG, font=FONT_BODY).pack(pady=(2, 0))
+
+    # ------------------------------------------------------------------
+    # Notebook
+    # ------------------------------------------------------------------
 
     def _build_notebook(self) -> None:
-        """Central tabbed notebook."""
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TNotebook",     background=_BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=_ACCENT, foreground=_FG,
-                        padding=[14, 6], font=("Helvetica", 10, "bold"))
-        style.map("TNotebook.Tab",
-                  background=[("selected", _GOLD)],
-                  foreground=[("selected", "#000")])
-        style.configure("Treeview", background=_PANEL, foreground=_FG,
-                        fieldbackground=_PANEL, rowheight=23)
-        style.configure("Treeview.Heading", background=_ACCENT, foreground=_GOLD,
-                        font=("Helvetica", 9, "bold"))
-        style.map("Treeview",
-                  background=[("selected", _BTN_RED)],
-                  foreground=[("selected", "#fff")])
-        style.configure("TScrollbar", background=_PANEL, troughcolor=_TROUGH)
+        self._nb = ttk.Notebook(self._root)
+        self._nb.pack(fill="both", expand=True, padx=8, pady=(6, 2))
+        self._nb.add(self._tab_dashboard(),  text="📊  Dashboard")
+        self._nb.add(self._tab_animals(),    text="🐾  Animals")
+        self._nb.add(self._tab_enclosures(), text="🏠  Enclosures")
+        self._nb.add(self._tab_resources(),  text="🛒  Resources")
+        self._nb.add(self._tab_finances(),   text="💰  Finances")
+        self._nb.add(self._tab_eventlog(),   text="📋  Event Log")
 
-        nb = ttk.Notebook(self._root)
-        nb.pack(fill="both", expand=True, padx=8, pady=6)
-
-        nb.add(self._tab_animals(),    text="🐾  Animals")
-        nb.add(self._tab_enclosures(), text="🏠  Enclosures")
-        nb.add(self._tab_resources(),  text="🛒  Resources")
-        nb.add(self._tab_finances(),   text="💰  Finances")
-        nb.add(self._tab_eventlog(),   text="📋  Event Log")
+    # ------------------------------------------------------------------
+    # Footer
+    # ------------------------------------------------------------------
 
     def _build_footer(self) -> None:
-        """Bottom action bar with game-wide controls."""
-        foot = tk.Frame(self._root, bg=_ACCENT, pady=8)
+        foot = tk.Frame(self._root, bg=_ACCENT, pady=9)
         foot.pack(fill="x", side="bottom")
+        _btn(foot, "  ⏩  Advance Day  ", self._do_advance_day,
+             bg=_BTN_RED).pack(side="left", padx=14)
+        _btn(foot, "💾 Save", self._do_save, bg=_BTN_BLU).pack(side="left", padx=4)
+        _btn(foot, "📂 Load", self._do_load, bg=_BTN_BLU).pack(side="left", padx=4)
+        _btn(foot, "Quit", self._do_quit, bg="#444").pack(side="right", padx=14)
+        self._score_var = tk.StringVar(value="Score: 0")
+        tk.Label(foot, textvariable=self._score_var, bg=_ACCENT,
+                 fg=_GOLD, font=FONT_HEAD).pack(side="right", padx=20)
 
-        _btn(foot, "  Advance Day  ➜  ", self._do_advance_day,
-             bg=_BTN_RED).pack(side="left", padx=12)
-        _btn(foot, "Save Game",  self._do_save).pack(side="left", padx=4)
-        _btn(foot, "Load Game",  self._do_load).pack(side="left", padx=4)
-        _btn(foot, "Quit", self._do_quit, bg="#444").pack(side="right", padx=12)
+    # ==================================================================
+    # Tab: Dashboard
+    # ==================================================================
 
-    # ------------------------------------------------------------------
-    # Tab builders
-    # ------------------------------------------------------------------
+    def _tab_dashboard(self) -> tk.Frame:
+        frame = tk.Frame(self._root, bg=_BG)
+
+        # KPI row
+        tile_row = tk.Frame(frame, bg=_BG)
+        tile_row.pack(fill="x", padx=14, pady=(14, 8))
+
+        self._kpi_balance = _KpiTile(tile_row, "Balance",  "AUD", _GOLD)
+        self._kpi_day     = _KpiTile(tile_row, "Day",      "",    _CYAN)
+        self._kpi_animals = _KpiTile(tile_row, "Animals",  "",    _GREEN)
+        self._kpi_score   = _KpiTile(tile_row, "Score",    "",    _ORANGE)
+        for tile in (self._kpi_balance, self._kpi_day,
+                     self._kpi_animals, self._kpi_score):
+            tile.pack(side="left", fill="x", expand=True, padx=6)
+
+        # Mid row: welfare + stats
+        mid = tk.Frame(frame, bg=_BG)
+        mid.pack(fill="both", expand=True, padx=14, pady=6)
+
+        welfare_card = tk.Frame(mid, bg=_CARD, padx=14, pady=14)
+        welfare_card.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        tk.Label(welfare_card, text="🏥  Average Animal Welfare",
+                 bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 10))
+        self._bar_avg_health    = _StatRow(welfare_card, "Health",    color=_GREEN)
+        self._bar_avg_hunger    = _StatRow(welfare_card, "Hunger",    color=_ORANGE)
+        self._bar_avg_happiness = _StatRow(welfare_card, "Happiness", color=_CYAN)
+        for bar in (self._bar_avg_health, self._bar_avg_hunger,
+                    self._bar_avg_happiness):
+            bar.pack(fill="x", pady=5)
+
+        stats_card = tk.Frame(mid, bg=_CARD, padx=14, pady=14)
+        stats_card.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        tk.Label(stats_card, text="📈  Zoo Statistics",
+                 bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 10))
+
+        self._dash_stat_vars: dict = {}
+        dash_rows = [
+            ("Total Visitors",  "total_visitors"),
+            ("Ticket Price",    "ticket_price"),
+            ("Animals Born",    "animals_born"),
+            ("Animals Died",    "animals_died"),
+            ("Enclosures",      "enclosures"),
+        ]
+        for label, key in dash_rows:
+            row = tk.Frame(stats_card, bg=_CARD)
+            row.pack(fill="x", pady=3)
+            tk.Label(row, text=f"{label}:", width=16, anchor="w",
+                     bg=_CARD, fg=_FG2, font=FONT_SMALL).pack(side="left")
+            var = tk.StringVar(value="—")
+            tk.Label(row, textvariable=var, bg=_CARD,
+                     fg=_FG, font=FONT_BOLD9).pack(side="left")
+            self._dash_stat_vars[key] = var
+
+        return frame
+
+    # ==================================================================
+    # Tab: Animals
+    # ==================================================================
 
     def _tab_animals(self) -> tk.Frame:
-        frame = tk.Frame(self._root, bg=_BG)  # parent will be the Notebook
-        cols  = ("Name", "Species", "Age", "Health", "Hunger", "Happiness")
-        self._anim_tree = ttk.Treeview(frame, columns=cols, show="headings",
-                                       selectmode="browse", height=15)
-        widths = (120, 140, 55, 80, 80, 90)
+        frame = tk.Frame(self._root, bg=_BG)
+
+        cols = ("Name", "Species", "Age", "Health", "Hunger", "Happiness", "Food")
+        self._anim_tree = ttk.Treeview(frame, columns=cols,
+                                       show="headings", selectmode="browse",
+                                       height=16)
+        widths = (110, 130, 50, 70, 70, 80, 80)
         for col, w in zip(cols, widths):
-            self._anim_tree.heading(col, text=col)
-            self._anim_tree.column(col, width=w, anchor="center")
+            self._anim_tree.heading(col, text=col,
+                                    command=lambda c=col: self._sort_animals(c))
+            self._anim_tree.column(col, width=w, anchor="center", minwidth=40)
 
         vsb = ttk.Scrollbar(frame, orient="vertical",
                              command=self._anim_tree.yview)
@@ -394,30 +584,60 @@ class OzZooGUI:
         self._anim_tree.pack(side="left", fill="both", expand=True,
                              padx=(8, 0), pady=8)
         vsb.pack(side="left", fill="y", pady=8)
+        self._anim_tree.bind("<<TreeviewSelect>>", self._on_animal_select)
 
-        sf = tk.Frame(frame, bg=_BG)
-        sf.pack(side="right", fill="y", padx=10, pady=8)
-        for label, cmd in [
-            ("Feed Selected",     self._do_feed_animal),
-            ("Medicate Selected", self._do_medicate_animal),
-            ("Make Perform",      self._do_perform_animal),
-            ("Move to Enclosure", self._do_move_animal),
-            ("Buy New Animal",    self._do_buy_animal),
+        # Detail panel
+        detail = tk.Frame(frame, bg=_CARD, padx=12, pady=12, width=230)
+        detail.pack(side="right", fill="y", padx=(6, 8), pady=8)
+        detail.pack_propagate(False)
+
+        tk.Label(detail, text="Selected Animal", bg=_CARD,
+                 fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 6))
+        self._detail_name    = tk.Label(detail, text="—", bg=_CARD,
+                                        fg=_FG, font=FONT_HEAD)
+        self._detail_name.pack(anchor="w")
+        self._detail_species = tk.Label(detail, text="", bg=_CARD,
+                                        fg=_FG2, font=FONT_SMALL,
+                                        justify="left", wraplength=210)
+        self._detail_species.pack(anchor="w", pady=(0, 8))
+
+        self._bar_health    = _StatRow(detail, "Health",    color=_GREEN)
+        self._bar_hunger    = _StatRow(detail, "Hunger",    color=_ORANGE)
+        self._bar_happiness = _StatRow(detail, "Happiness", color=_CYAN)
+        for bar in (self._bar_health, self._bar_hunger, self._bar_happiness):
+            bar.pack(fill="x", pady=4)
+
+        tk.Frame(detail, bg=_ACCENT, height=1).pack(fill="x", pady=10)
+
+        for text, cmd in [
+            ("🍖 Feed",         self._do_feed_animal),
+            ("💊 Medicate",     self._do_medicate_animal),
+            ("🎭 Make Perform", self._do_perform_animal),
+            ("🚚 Move",         self._do_move_animal),
         ]:
-            _btn(sf, label, cmd).pack(fill="x", pady=4)
+            _btn(detail, text, cmd, bg=_BTN_BLU).pack(fill="x", pady=3)
+
+        tk.Frame(detail, bg=_ACCENT, height=1).pack(fill="x", pady=10)
+        _btn(detail, "🛒 Buy New Animal", self._do_buy_animal,
+             bg=_BTN_RED).pack(fill="x", pady=3)
 
         return frame
 
+    # ==================================================================
+    # Tab: Enclosures
+    # ==================================================================
+
     def _tab_enclosures(self) -> tk.Frame:
         frame = tk.Frame(self._root, bg=_BG)
-        cols  = ("ID", "Name", "Habitat", "Animals", "Capacity",
-                 "Cleanliness", "Level")
-        self._enc_tree = ttk.Treeview(frame, columns=cols, show="headings",
-                                      selectmode="browse", height=15)
-        widths = (80, 160, 100, 70, 80, 110, 60)
+
+        cols = ("ID", "Name", "Habitat", "Animals", "Cap", "Cleanliness", "Level")
+        self._enc_tree = ttk.Treeview(frame, columns=cols,
+                                      show="headings", selectmode="browse",
+                                      height=16)
+        widths = (80, 160, 100, 70, 60, 100, 60)
         for col, w in zip(cols, widths):
             self._enc_tree.heading(col, text=col)
-            self._enc_tree.column(col, width=w, anchor="center")
+            self._enc_tree.column(col, width=w, anchor="center", minwidth=40)
 
         vsb = ttk.Scrollbar(frame, orient="vertical",
                              command=self._enc_tree.yview)
@@ -425,103 +645,268 @@ class OzZooGUI:
         self._enc_tree.pack(side="left", fill="both", expand=True,
                             padx=(8, 0), pady=8)
         vsb.pack(side="left", fill="y", pady=8)
+        self._enc_tree.bind("<<TreeviewSelect>>", self._on_enclosure_select)
 
-        sf = tk.Frame(frame, bg=_BG)
-        sf.pack(side="right", fill="y", padx=10, pady=8)
-        for label, cmd in [
-            ("Clean Selected",      self._do_clean_enclosure),
-            ("Upgrade Selected",    self._do_upgrade_enclosure),
-            ("Build New Enclosure", self._do_build_enclosure),
+        # Detail panel
+        detail = tk.Frame(frame, bg=_CARD, padx=12, pady=12, width=210)
+        detail.pack(side="right", fill="y", padx=(6, 8), pady=8)
+        detail.pack_propagate(False)
+
+        tk.Label(detail, text="Selected Enclosure", bg=_CARD,
+                 fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 6))
+        self._enc_detail_name = tk.Label(detail, text="—", bg=_CARD,
+                                         fg=_FG, font=FONT_HEAD)
+        self._enc_detail_name.pack(anchor="w")
+        self._enc_detail_info = tk.Label(detail, text="", bg=_CARD,
+                                         fg=_FG2, font=FONT_SMALL,
+                                         justify="left", wraplength=180)
+        self._enc_detail_info.pack(anchor="w", pady=(0, 8))
+
+        self._bar_cleanliness = _StatRow(detail, "Cleanliness", color=_CYAN)
+        self._bar_occupancy   = _StatRow(detail, "Occupancy %", color=_PURPLE)
+        for bar in (self._bar_cleanliness, self._bar_occupancy):
+            bar.pack(fill="x", pady=4)
+
+        tk.Frame(detail, bg=_ACCENT, height=1).pack(fill="x", pady=10)
+        for text, cmd in [
+            ("🧹 Clean",   self._do_clean_enclosure),
+            ("🔧 Upgrade", self._do_upgrade_enclosure),
         ]:
-            _btn(sf, label, cmd).pack(fill="x", pady=4)
+            _btn(detail, text, cmd, bg=_BTN_BLU).pack(fill="x", pady=3)
+
+        tk.Frame(detail, bg=_ACCENT, height=1).pack(fill="x", pady=10)
+        _btn(detail, "🏗️ Build New Enclosure", self._do_build_enclosure,
+             bg=_BTN_RED).pack(fill="x", pady=3)
 
         return frame
+
+    # ==================================================================
+    # Tab: Resources
+    # ==================================================================
 
     def _tab_resources(self) -> tk.Frame:
         frame = tk.Frame(self._root, bg=_BG)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
 
-        food_lf = tk.LabelFrame(frame, text=" 🌿  Food Inventory ",
-                                bg=_BG, fg=_GOLD, font=("Helvetica", 10, "bold"),
-                                labelanchor="n")
-        food_lf.pack(fill="both", expand=True, padx=14, pady=(14, 6))
-        self._food_txt = _text_area(food_lf, height=8)
-        self._food_txt.pack(fill="both", expand=True, padx=6, pady=6)
-        _btn(food_lf, "Buy Food", self._do_buy_food,
-             bg=_BTN_RED).pack(pady=(0, 8))
+        # Food card
+        food_card = tk.Frame(frame, bg=_CARD, padx=14, pady=14)
+        food_card.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=12)
 
-        med_lf = tk.LabelFrame(frame, text=" 💊  Medicine Inventory ",
-                               bg=_BG, fg=_GOLD, font=("Helvetica", 10, "bold"),
-                               labelanchor="n")
-        med_lf.pack(fill="both", expand=True, padx=14, pady=(6, 14))
-        self._med_txt = _text_area(med_lf, height=8)
-        self._med_txt.pack(fill="both", expand=True, padx=6, pady=6)
-        _btn(med_lf, "Buy Medicine", self._do_buy_medicine,
-             bg=_BTN_RED).pack(pady=(0, 8))
+        hdr_f = tk.Frame(food_card, bg=_CARD)
+        hdr_f.pack(fill="x", pady=(0, 10))
+        tk.Label(hdr_f, text="🌿  Food Inventory", bg=_CARD,
+                 fg=_GOLD, font=FONT_HEAD).pack(side="left")
+        _btn(hdr_f, "Buy Food", self._do_buy_food, bg=_BTN_RED).pack(side="right")
+
+        self._food_bars: dict[str, _CanvasBar] = {}
+        self._food_qty_vars: dict[str, tk.StringVar] = {}
+        FOOD_MAX = 100
+        for ft in sorted(self._zoo.food_inventory.VALID_TYPES):
+            row = tk.Frame(food_card, bg=_CARD)
+            row.pack(fill="x", pady=5)
+            tk.Label(row, text=ft.capitalize(), width=10, anchor="w",
+                     bg=_CARD, fg=_FG, font=FONT_BODY).pack(side="left")
+            bar = _CanvasBar(row, max_val=FOOD_MAX, color=_GREEN, bg=_CARD)
+            bar.pack(side="left", fill="x", expand=True, padx=6)
+            var = tk.StringVar(value="")
+            tk.Label(row, textvariable=var, width=10, anchor="e",
+                     bg=_CARD, fg=_FG2, font=FONT_SMALL).pack(side="left")
+            self._food_bars[ft]     = bar
+            self._food_qty_vars[ft] = var
+
+        # Medicine card
+        med_card = tk.Frame(frame, bg=_CARD, padx=14, pady=14)
+        med_card.grid(row=0, column=1, sticky="nsew", padx=(6, 12), pady=12)
+
+        hdr_m = tk.Frame(med_card, bg=_CARD)
+        hdr_m.pack(fill="x", pady=(0, 10))
+        tk.Label(hdr_m, text="💊  Medicine Inventory", bg=_CARD,
+                 fg=_GOLD, font=FONT_HEAD).pack(side="left")
+        _btn(hdr_m, "Buy Medicine", self._do_buy_medicine,
+             bg=_BTN_RED).pack(side="right")
+
+        self._med_bars: dict[str, _CanvasBar] = {}
+        self._med_qty_vars: dict[str, tk.StringVar] = {}
+        MED_MAX = 30
+        for mt in sorted(self._zoo.medicine_inventory.VALID_TYPES):
+            row = tk.Frame(med_card, bg=_CARD)
+            row.pack(fill="x", pady=5)
+            tk.Label(row, text=mt.capitalize(), width=12, anchor="w",
+                     bg=_CARD, fg=_FG, font=FONT_BODY).pack(side="left")
+            bar = _CanvasBar(row, max_val=MED_MAX, color=_CYAN, bg=_CARD)
+            bar.pack(side="left", fill="x", expand=True, padx=6)
+            var = tk.StringVar(value="")
+            tk.Label(row, textvariable=var, width=10, anchor="e",
+                     bg=_CARD, fg=_FG2, font=FONT_SMALL).pack(side="left")
+            self._med_bars[mt]     = bar
+            self._med_qty_vars[mt] = var
 
         return frame
+
+    # ==================================================================
+    # Tab: Finances
+    # ==================================================================
 
     def _tab_finances(self) -> tk.Frame:
         frame = tk.Frame(self._root, bg=_BG)
 
-        self._fin_txt = _text_area(frame)
-        vsb = ttk.Scrollbar(frame, orient="vertical",
-                             command=self._fin_txt.yview)
-        self._fin_txt.configure(yscrollcommand=vsb.set)
-        self._fin_txt.pack(side="left", fill="both", expand=True,
-                           padx=(8, 0), pady=8)
-        vsb.pack(side="left", fill="y", pady=8)
+        # KPI tiles
+        tile_row = tk.Frame(frame, bg=_BG)
+        tile_row.pack(fill="x", padx=14, pady=(14, 6))
+        self._fin_kpi_balance  = _KpiTile(tile_row, "Current Balance", "AUD", _GOLD)
+        self._fin_kpi_income   = _KpiTile(tile_row, "Total Income",    "AUD", _GREEN)
+        self._fin_kpi_expenses = _KpiTile(tile_row, "Total Expenses",  "AUD", _RED)
+        self._fin_kpi_ticket   = _KpiTile(tile_row, "Ticket Price",    "AUD", _CYAN)
+        for tile in (self._fin_kpi_balance, self._fin_kpi_income,
+                     self._fin_kpi_expenses, self._fin_kpi_ticket):
+            tile.pack(side="left", fill="x", expand=True, padx=6)
 
-        sf = tk.Frame(frame, bg=_BG)
-        sf.pack(side="right", fill="y", padx=10, pady=8)
-        for label, cmd in [
-            ("Set Ticket Price",      self._do_set_ticket_price),
-            ("Income by Source",      self._do_income_sources),
-            ("Expenses by Category",  self._do_expense_categories),
-        ]:
-            _btn(sf, label, cmd).pack(fill="x", pady=4)
+        # Action buttons
+        btn_row = tk.Frame(frame, bg=_BG)
+        btn_row.pack(fill="x", padx=14, pady=(0, 8))
+        _btn(btn_row, "🎟️ Set Ticket Price",
+             self._do_set_ticket_price, bg=_BTN_RED).pack(side="left", padx=4)
+        _btn(btn_row, "📊 Income by Source",
+             self._do_income_sources, bg=_BTN_BLU).pack(side="left", padx=4)
+        _btn(btn_row, "📉 Expenses by Category",
+             self._do_expense_categories, bg=_BTN_BLU).pack(side="left", padx=4)
+
+        # Ledger treeview
+        lf = tk.Frame(frame, bg=_BG)
+        lf.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        tk.Label(lf, text="Recent Transactions (newest first)",
+                 bg=_BG, fg=_FG2, font=FONT_SMALL).pack(anchor="w")
+
+        cols = ("Date", "Type", "Category", "Amount", "Description")
+        self._ledger_tree = ttk.Treeview(lf, columns=cols,
+                                         show="headings", selectmode="none",
+                                         height=10)
+        widths = (100, 70, 120, 120, 300)
+        anchors = ("center", "center", "center", "center", "w")
+        for col, w, anch in zip(cols, widths, anchors):
+            self._ledger_tree.heading(col, text=col)
+            self._ledger_tree.column(col, width=w, anchor=anch)
+        self._ledger_tree.tag_configure("income",  foreground=_GREEN)
+        self._ledger_tree.tag_configure("expense", foreground=_RED)
+
+        vsb = ttk.Scrollbar(lf, orient="vertical",
+                             command=self._ledger_tree.yview)
+        self._ledger_tree.configure(yscrollcommand=vsb.set)
+        self._ledger_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
 
         return frame
+
+    # ==================================================================
+    # Tab: Event Log
+    # ==================================================================
 
     def _tab_eventlog(self) -> tk.Frame:
         frame = tk.Frame(self._root, bg=_BG)
 
-        self._log_txt = _text_area(frame)
-        vsb = ttk.Scrollbar(frame, orient="vertical",
-                             command=self._log_txt.yview)
+        # Colour legend
+        legend = tk.Frame(frame, bg=_BG)
+        legend.pack(fill="x", padx=10, pady=(8, 2))
+        tk.Label(legend, text="Colour key:", bg=_BG,
+                 fg=_FG2, font=FONT_SMALL).pack(side="left", padx=(0, 8))
+        for color, label in [
+            (_TAG_BIRTH,   "Birth"),
+            (_TAG_DEATH,   "Death"),
+            (_TAG_WELFARE, "Welfare"),
+            (_TAG_FINANCE, "Finance"),
+            (_TAG_RANDOM,  "Random event"),
+            (_TAG_HABITAT, "Habitat"),
+        ]:
+            tk.Label(legend, text=f"■ {label}", bg=_BG,
+                     fg=color, font=FONT_SMALL).pack(side="left", padx=5)
+
+        # Text area
+        self._log_txt = tk.Text(frame, bg=_PANEL, fg=_FG,
+                                insertbackground=_FG, relief="flat",
+                                font=FONT_MONO, state="disabled", wrap="word")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self._log_txt.yview)
         self._log_txt.configure(yscrollcommand=vsb.set)
         self._log_txt.pack(side="left", fill="both", expand=True,
                            padx=(8, 0), pady=8)
         vsb.pack(side="left", fill="y", pady=8)
 
+        # Tags
+        self._log_txt.tag_configure("BIRTH",   foreground=_TAG_BIRTH)
+        self._log_txt.tag_configure("DEATH",   foreground=_TAG_DEATH)
+        self._log_txt.tag_configure("WELFARE", foreground=_TAG_WELFARE)
+        self._log_txt.tag_configure("FINANCE", foreground=_TAG_FINANCE)
+        self._log_txt.tag_configure("RANDOM",  foreground=_TAG_RANDOM)
+        self._log_txt.tag_configure("HABITAT", foreground=_TAG_HABITAT)
+        self._log_txt.tag_configure("DEFAULT", foreground=_FG)
+
         return frame
 
-    # ------------------------------------------------------------------
-    # Refresh / update helpers
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Refresh logic
+    # ==================================================================
+
+    def _schedule_refresh(self) -> None:
+        self._update_header()
+        self._update_dashboard()
+        self._root.after(self._REFRESH_MS, self._schedule_refresh)
 
     def _refresh(self) -> None:
-        """Redraw all widgets from the current Zoo state."""
         self._update_header()
+        self._update_dashboard()
         self._update_animals_tree()
         self._update_enclosures_tree()
-        self._update_resources_text()
-        self._update_finances_text()
-        self._update_eventlog_text()
+        self._update_resources_bars()
+        self._update_finances()
+        self._update_eventlog()
 
     def _update_header(self) -> None:
         zoo = self._zoo
         self._status_var.set(
-            f"Day: {zoo.day}  │  "
-            f"💰 ${zoo.finance.get_balance():,.2f} AUD  │  "
-            f"👥 Visitors: {len(zoo.daily_visitors)}  │  "
-            f"🏆 Score: {zoo.score}"
+            f"Day {zoo.day}  ·  "
+            f"Balance: ${zoo.finance.get_balance():,.2f} AUD  ·  "
+            f"Visitors today: {len(zoo.daily_visitors)}  ·  "
+            f"Animals: {len(zoo.get_alive_animals())}"
         )
+        self._score_var.set(f"Score: {zoo.score}")
+
+    def _update_dashboard(self) -> None:
+        zoo   = self._zoo
+        alive = zoo.get_alive_animals()
+
+        self._kpi_balance.set(f"${zoo.finance.get_balance():,.0f}")
+        self._kpi_day.set(zoo.day)
+        self._kpi_animals.set(len(alive))
+        self._kpi_score.set(zoo.score)
+
+        if alive:
+            avg_h  = int(sum(a.health    for a in alive) / len(alive))
+            avg_hu = int(sum(a.hunger    for a in alive) / len(alive))
+            avg_hp = int(sum(a.happiness for a in alive) / len(alive))
+        else:
+            avg_h = avg_hu = avg_hp = 0
+
+        self._bar_avg_health.set_value(avg_h,  _health_color(avg_h))
+        self._bar_avg_hunger.set_value(avg_hu, _health_color(100 - avg_hu))
+        self._bar_avg_happiness.set_value(avg_hp, _health_color(avg_hp))
+
+        stats = {
+            "total_visitors": f"{zoo.total_visitors:,}",
+            "ticket_price":   f"${zoo.ticket_price:.2f}",
+            "animals_born":   str(zoo.animals_born),
+            "animals_died":   str(zoo.animals_died),
+            "enclosures":     str(len(zoo.enclosures)),
+        }
+        for k, v in stats.items():
+            if k in self._dash_stat_vars:
+                self._dash_stat_vars[k].set(v)
 
     def _update_animals_tree(self) -> None:
         tree = self._anim_tree
-        # Remember selection by name
-        focused = tree.focus()
+        focused  = tree.focus()
         sel_name = tree.item(focused, "values")[0] if focused else None
+
         for item in tree.get_children():
             tree.delete(item)
 
@@ -530,11 +915,11 @@ class OzZooGUI:
             tag   = f"h_{a.name}"
             tree.insert("", "end",
                         values=(a.name, a.species, a.age,
-                                a.health, a.hunger, a.happiness),
+                                a.health, a.hunger, a.happiness,
+                                a.required_food),
                         tags=(tag,))
             tree.tag_configure(tag, foreground=color)
 
-        # Restore selection
         if sel_name:
             for item in tree.get_children():
                 if tree.item(item, "values")[0] == sel_name:
@@ -542,10 +927,48 @@ class OzZooGUI:
                     tree.selection_set(item)
                     break
 
+        self._refresh_animal_detail()
+
+    def _on_animal_select(self, _event=None) -> None:
+        self._refresh_animal_detail()
+
+    def _refresh_animal_detail(self) -> None:
+        focused = self._anim_tree.focus()
+        if not focused:
+            self._detail_name.config(text="—")
+            self._detail_species.config(text="")
+            for bar in (self._bar_health, self._bar_hunger, self._bar_happiness):
+                bar.set_value(0)
+            return
+        vals = self._anim_tree.item(focused, "values")
+        if not vals:
+            return
+        name, species, age, health, hunger, happiness, food = vals
+        self._detail_name.config(text=name)
+        self._detail_species.config(
+            text=f"{species}  ·  Age {age}  ·  Food: {food}")
+        self._bar_health.set_value(int(health),    _health_color(int(health)))
+        self._bar_hunger.set_value(int(hunger),    _health_color(100 - int(hunger)))
+        self._bar_happiness.set_value(int(happiness), _health_color(int(happiness)))
+
+    def _sort_animals(self, col: str) -> None:
+        rev = (self._anim_sort_col == col) and (not self._anim_sort_rev)
+        self._anim_sort_col = col
+        self._anim_sort_rev = rev
+        items = [(self._anim_tree.set(k, col), k)
+                 for k in self._anim_tree.get_children()]
+        try:
+            items.sort(key=lambda x: int(x[0]), reverse=rev)
+        except ValueError:
+            items.sort(key=lambda x: x[0].lower(), reverse=rev)
+        for idx, (_, k) in enumerate(items):
+            self._anim_tree.move(k, "", idx)
+
     def _update_enclosures_tree(self) -> None:
         tree = self._enc_tree
         focused = tree.focus()
         sel_id  = tree.item(focused, "values")[0] if focused else None
+
         for item in tree.get_children():
             tree.delete(item)
 
@@ -566,24 +989,106 @@ class OzZooGUI:
                     tree.selection_set(item)
                     break
 
-    def _update_resources_text(self) -> None:
-        _write_text(self._food_txt, self._zoo.food_inventory.report())
-        _write_text(self._med_txt,  self._zoo.medicine_inventory.report())
+        self._refresh_enclosure_detail()
 
-    def _update_finances_text(self) -> None:
-        _write_text(self._fin_txt, self._zoo.finance.get_report())
+    def _on_enclosure_select(self, _event=None) -> None:
+        self._refresh_enclosure_detail()
 
-    def _update_eventlog_text(self) -> None:
-        entries = self._zoo.event_logger.get_recent(60)
-        content = "\n".join(entries) if entries else "(No events logged yet.)"
-        _write_text(self._log_txt, content)
+    def _refresh_enclosure_detail(self) -> None:
+        focused = self._enc_tree.focus()
+        if not focused:
+            self._enc_detail_name.config(text="—")
+            self._enc_detail_info.config(text="")
+            for bar in (self._bar_cleanliness, self._bar_occupancy):
+                bar.set_value(0)
+            return
+        vals = self._enc_tree.item(focused, "values")
+        if not vals:
+            return
+        enc_id, name, habitat, animals, cap, cleanliness, level = vals
+        self._enc_detail_name.config(text=name)
+        self._enc_detail_info.config(
+            text=f"{enc_id}  ·  {habitat}\n"
+                 f"Level {level}  ·  {animals}/{cap} animals")
+        self._bar_cleanliness.set_value(int(cleanliness),
+                                        _health_color(int(cleanliness)))
+        occ_pct = int(100 * int(animals) / int(cap)) if int(cap) > 0 else 0
+        self._bar_occupancy.set_value(occ_pct, _health_color(100 - occ_pct))
+
+    def _update_resources_bars(self) -> None:
+        FOOD_MAX = 100
+        MED_MAX  = 30
+        for ft, bar in self._food_bars.items():
+            qty = self._zoo.food_inventory.get_quantity(ft)
+            bar.set_value(min(qty, FOOD_MAX),
+                          _health_color(int(100 * min(qty, FOOD_MAX) / FOOD_MAX)))
+            self._food_qty_vars[ft].set(f"{qty} units")
+        for mt, bar in self._med_bars.items():
+            qty = self._zoo.medicine_inventory.get_quantity(mt)
+            bar.set_value(min(qty, MED_MAX),
+                          _health_color(int(100 * min(qty, MED_MAX) / MED_MAX)))
+            self._med_qty_vars[mt].set(f"{qty} doses")
+
+    def _update_finances(self) -> None:
+        fin = self._zoo.finance
+        sources = fin.get_income_by_source()
+        cats    = fin.get_expenses_by_category()
+        total_in  = sum(sources.values())
+        total_out = sum(cats.values())
+
+        self._fin_kpi_balance.set(f"${fin.get_balance():,.2f}")
+        self._fin_kpi_income.set(f"${total_in:,.2f}")
+        self._fin_kpi_expenses.set(f"${total_out:,.2f}")
+        self._fin_kpi_ticket.set(f"${self._zoo.ticket_price:.2f}")
+
+        for item in self._ledger_tree.get_children():
+            self._ledger_tree.delete(item)
+
+        rows: list[tuple[str, str, str, str, str]] = []
+        income_entries, expense_entries = fin.get_recent_ledger(20)
+        for ts, amt, cat, desc in income_entries:
+            rows.append((ts[:10], "INCOME", cat, f"+${amt:,.2f}", desc))
+        for ts, amt, cat, desc in expense_entries:
+            rows.append((ts[:10], "EXPENSE", cat, f"-${amt:,.2f}", desc))
+        rows.sort(key=lambda r: r[0], reverse=True)
+        for row in rows[:20]:
+            tag = "income" if row[1] == "INCOME" else "expense"
+            self._ledger_tree.insert("", "end", values=row, tags=(tag,))
+
+    def _update_eventlog(self) -> None:
+        # Merge accumulated tick lines + any un-cleared observer events
+        observer_entries = self._zoo.event_logger.get_recent(80)
+        lines = self._event_lines + observer_entries
+        if not lines:
+            lines = ["(No events yet — advance the day to see activity.)"]
+
         self._log_txt.configure(state="normal")
+        self._log_txt.delete("1.0", "end")
+        for line in lines:
+            upper = line.upper()
+            if "ANIMAL_BORN" in upper or "BABY" in upper or "🍼" in line:
+                tag = "BIRTH"
+            elif "ANIMAL_DIED" in upper or "DIED" in upper or "💀" in line:
+                tag = "DEATH"
+            elif "CRITICAL" in upper or "WELFARE" in upper:
+                tag = "WELFARE"
+            elif "REVENUE" in upper or "BALANCE" in upper or "FINANCE" in upper:
+                tag = "FINANCE"
+            elif "RANDOM" in upper or "⚡" in line or "🎉" in line:
+                tag = "RANDOM"
+            elif "HABITAT" in upper or "🏡" in line:
+                tag = "HABITAT"
+            elif "─" in line or "📅" in line:
+                tag = "DEFAULT"
+            else:
+                tag = "DEFAULT"
+            self._log_txt.insert("end", line + "\n", tag)
         self._log_txt.see("end")
         self._log_txt.configure(state="disabled")
 
-    # ------------------------------------------------------------------
+    # ==================================================================
     # Selection helpers
-    # ------------------------------------------------------------------
+    # ==================================================================
 
     def _selected_animal_name(self) -> Optional[str]:
         focused = self._anim_tree.focus()
@@ -601,29 +1106,79 @@ class OzZooGUI:
             return None
         return self._enc_tree.item(focused, "values")[0]
 
-    # ------------------------------------------------------------------
+    # ==================================================================
     # Action handlers
-    # ------------------------------------------------------------------
+    # ==================================================================
 
     def _do_advance_day(self) -> None:
         report = self._loop.tick()
         self._refresh()
-        # Show the daily report in a scrollable popup
+
+        # Accumulate report lines into our event history
+        day = self._zoo.day
+        self._event_lines.append(f"{'─' * 55}")
+        self._event_lines.append(f"📅  Day {day} — Daily Report")
+        self._event_lines.append(f"{'─' * 55}")
+        for line in report.split("\n"):
+            stripped = line.strip()
+            if stripped and stripped not in ("─" * 50, "─" * 55):
+                self._event_lines.append(line)
+        # Also capture any observer events logged today
+        for entry in self._zoo.event_logger.get_all_entries():
+            ts = entry["timestamp"][:10]
+            et = entry["event_type"].upper()
+            msg = entry["data"].get("message") or str(entry["data"])
+            self._event_lines.append(f"[{ts}] {et}: {msg}")
+        self._zoo.event_logger.clear()   # don't double-show on next refresh
+
+        self._update_eventlog()
+
         dlg = tk.Toplevel(self._root)
-        dlg.title(f"Day {self._zoo.day} — Daily Report")
+        dlg.title(f"📅  Day {self._zoo.day} — Daily Report")
         dlg.configure(bg=_BG)
         dlg.grab_set()
 
-        txt = _text_area(dlg, width=62, height=26)
-        txt.configure(state="normal")
-        txt.insert("end", report)
+        hdr = tk.Frame(dlg, bg=_ACCENT, pady=10)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=f"📅  Day {self._zoo.day} — Daily Report",
+                 bg=_ACCENT, fg=_GOLD, font=FONT_HEAD).pack()
+        bal = self._zoo.finance.get_balance()
+        tk.Label(hdr,
+                 text=f"Balance: ${bal:,.2f} AUD  ·  Score: {self._zoo.score}",
+                 bg=_ACCENT, fg=_FG, font=FONT_BODY).pack()
+
+        txt = tk.Text(dlg, bg=_PANEL, fg=_FG, insertbackground=_FG,
+                      relief="flat", font=FONT_MONO, width=64, height=22,
+                      state="normal", wrap="word")
+        for tag, color in [("revenue", _GREEN), ("animal", _GOLD),
+                            ("dead", _RED), ("random", _YELLOW),
+                            ("habitat", _CYAN), ("sep", _FG2)]:
+            txt.tag_configure(tag, foreground=color)
+
+        for line in report.split("\n"):
+            ul = line.upper()
+            if "REVENUE" in ul or "BALANCE" in ul:
+                tag = "revenue"
+            elif "🐾" in line or "🍼" in line or "ANIMAL" in ul:
+                tag = "animal"
+            elif "💀" in line or "DIED" in ul:
+                tag = "dead"
+            elif "⚡" in line or "RANDOM" in ul or "🎉" in line:
+                tag = "random"
+            elif "🏡" in line or "HABITAT" in ul or "⚠️" in line:
+                tag = "habitat"
+            elif "─" in line or "=" in line:
+                tag = "sep"
+            else:
+                tag = ""
+            txt.insert("end", line + "\n", tag)
+
         txt.configure(state="disabled")
         vsb = ttk.Scrollbar(dlg, orient="vertical", command=txt.yview)
         txt.configure(yscrollcommand=vsb.set)
         txt.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=12)
         vsb.pack(side="left", fill="y", pady=12)
-
-        _btn(dlg, "Close", dlg.destroy).pack(pady=(0, 10))
+        _btn(dlg, "Close", dlg.destroy, bg=_BTN_BLU).pack(pady=(0, 12))
 
     def _do_feed_animal(self) -> None:
         name = self._selected_animal_name()
@@ -640,18 +1195,12 @@ class OzZooGUI:
         name = self._selected_animal_name()
         if name is None:
             return
-        med_types = ["antibiotic", "vitamin", "vaccine", "painkiller"]
-        med = simpledialog.askstring(
-            "Medicate Animal",
-            f"Medicine type for {name}:\n({', '.join(med_types)})",
-            initialvalue="antibiotic",
-            parent=self._root,
-        )
-        if med is None:
+        dlg = _MedicateDialog(self._root, name)
+        if dlg.result is None:
             return
         try:
-            msg = self._zoo.medicate_animal(name, med.strip() or "antibiotic")
-            messagebox.showinfo("Medicate Animal", msg)
+            msg = self._zoo.medicate_animal(name, dlg.result)
+            messagebox.showinfo("Medicate", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
         self._refresh()
@@ -668,8 +1217,8 @@ class OzZooGUI:
                     result = getattr(animal, method)()
                     break
             sound = animal.make_sound()
-            messagebox.showinfo(f"{name} Performs",
-                                f"{result or sound}\n\n{sound}")
+            messagebox.showinfo(f"🎭 {name} Performs",
+                                (result or sound) + "\n\n" + sound)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
 
@@ -703,7 +1252,7 @@ class OzZooGUI:
             return
         try:
             msg = self._zoo.clean_enclosure(enc_id)
-            messagebox.showinfo("Clean Enclosure", msg)
+            messagebox.showinfo("Clean", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
         self._refresh()
@@ -714,7 +1263,7 @@ class OzZooGUI:
             return
         try:
             msg = self._zoo.upgrade_enclosure(enc_id)
-            messagebox.showinfo("Upgrade Enclosure", msg)
+            messagebox.showinfo("Upgrade", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
         self._refresh()
@@ -732,67 +1281,43 @@ class OzZooGUI:
         self._refresh()
 
     def _do_buy_food(self) -> None:
-        food_types = sorted(self._zoo.food_inventory.VALID_TYPES)
-        food_type = simpledialog.askstring(
-            "Buy Food",
-            f"Food type:\n({', '.join(food_types)})",
-            initialvalue=food_types[0],
-            parent=self._root,
+        dlg = _BuyResourceDialog(
+            self._root, "Food",
+            sorted(self._zoo.food_inventory.VALID_TYPES),
+            "grass", 20, 500, "Units",
         )
-        if food_type is None:
+        if dlg.result is None:
             return
-        units = simpledialog.askinteger(
-            "Buy Food", "Units to purchase:",
-            initialvalue=10, minvalue=1, maxvalue=500,
-            parent=self._root,
-        )
-        if units is None:
-            return
+        food_type, units = dlg.result
         try:
-            msg = self._zoo.buy_food(food_type.strip(), units)
+            msg = self._zoo.buy_food(food_type, units)
             messagebox.showinfo("Buy Food", msg)
         except (OzZooException, ValueError) as exc:
             messagebox.showerror("Error", str(exc))
         self._refresh()
 
     def _do_buy_medicine(self) -> None:
-        med_types = sorted(self._zoo.medicine_inventory.VALID_TYPES)
-        med_type = simpledialog.askstring(
-            "Buy Medicine",
-            f"Medicine type:\n({', '.join(med_types)})",
-            initialvalue=med_types[0],
-            parent=self._root,
+        dlg = _BuyResourceDialog(
+            self._root, "Medicine",
+            sorted(self._zoo.medicine_inventory.VALID_TYPES),
+            "antibiotic", 5, 200, "Doses",
         )
-        if med_type is None:
+        if dlg.result is None:
             return
-        doses = simpledialog.askinteger(
-            "Buy Medicine", "Doses to purchase:",
-            initialvalue=5, minvalue=1, maxvalue=200,
-            parent=self._root,
-        )
-        if doses is None:
-            return
+        med_type, doses = dlg.result
         try:
-            msg = self._zoo.buy_medicine(med_type.strip(), doses)
+            msg = self._zoo.buy_medicine(med_type, doses)
             messagebox.showinfo("Buy Medicine", msg)
         except (OzZooException, ValueError) as exc:
             messagebox.showerror("Error", str(exc))
         self._refresh()
 
     def _do_set_ticket_price(self) -> None:
-        current = self._zoo.ticket_price
-        price = simpledialog.askfloat(
-            "Set Ticket Price",
-            f"Current price: ${current:.2f} AUD\nNew price ($):",
-            initialvalue=current,
-            minvalue=0.01,
-            maxvalue=500.0,
-            parent=self._root,
-        )
-        if price is None:
+        dlg = _SetTicketDialog(self._root, self._zoo.ticket_price)
+        if dlg.result is None:
             return
         try:
-            msg = self._zoo.set_ticket_price(price)
+            msg = self._zoo.set_ticket_price(dlg.result)
             messagebox.showinfo("Ticket Price", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
@@ -803,19 +1328,19 @@ class OzZooGUI:
         if not sources:
             messagebox.showinfo("Income by Source", "No income recorded yet.")
             return
-        lines = ["Income by Source:", ""]
-        for src, total in sorted(sources.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"  {src:<22}  ${total:>12,.2f} AUD")
+        lines = ["Income by Source\n"]
+        for src, tot in sorted(sources.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"  {src:<22}  ${tot:>12,.2f} AUD")
         messagebox.showinfo("Income by Source", "\n".join(lines))
 
     def _do_expense_categories(self) -> None:
         cats = self._zoo.finance.get_expenses_by_category()
         if not cats:
-            messagebox.showinfo("Expenses by Category", "No expenses recorded yet.")
+            messagebox.showinfo("Expenses", "No expenses recorded yet.")
             return
-        lines = ["Expenses by Category:", ""]
-        for cat, total in sorted(cats.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"  {cat:<22}  ${total:>12,.2f} AUD")
+        lines = ["Expenses by Category\n"]
+        for cat, tot in sorted(cats.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"  {cat:<22}  ${tot:>12,.2f} AUD")
         messagebox.showinfo("Expenses by Category", "\n".join(lines))
 
     def _do_save(self) -> None:
@@ -823,7 +1348,7 @@ class OzZooGUI:
             data = self._zoo.to_dict()
             with open(SAVE_FILE, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
-            messagebox.showinfo("Save Game", f"✅ Game saved to '{SAVE_FILE}'.")
+            messagebox.showinfo("Save Game", f"Game saved to '{SAVE_FILE}'.")
         except Exception as exc:
             messagebox.showerror("Save Error", str(exc))
 
@@ -843,23 +1368,24 @@ class OzZooGUI:
             self._zoo = Zoo(name=data.get("name", "OzZoo"))
             self._zoo.from_dict(data)
             self._loop = GameLoop(self._zoo)
-
+            self._event_lines = []   # clear accumulated events on load
             self._refresh()
-            messagebox.showinfo("Load Game", f"✅ Game loaded from '{SAVE_FILE}'.")
+            messagebox.showinfo("Load Game", f"Game loaded from '{SAVE_FILE}'.")
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
 
     def _do_quit(self) -> None:
-        if messagebox.askyesno("Quit", "Are you sure you want to quit OzZoo?"):
+        if messagebox.askyesno("Quit OzZoo",
+                               f"Are you sure?\n\nFinal score: {self._zoo.score}"):
             self._root.quit()
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Entry point
 # ---------------------------------------------------------------------------
 
 def run_gui() -> None:
-    """Create the Tk root window and start the OzZoo GUI."""
+    """Create the Tk root and start the OzZoo GUI."""
     root = tk.Tk()
     OzZooGUI(root)
     root.mainloop()

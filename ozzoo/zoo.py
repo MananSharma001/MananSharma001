@@ -1012,6 +1012,21 @@ class Zoo:
         """Visitors from the most recent day."""
         return list(self._daily_visitors)
 
+    @property
+    def total_visitors(self) -> int:
+        """Cumulative visitor count across all days."""
+        return self._total_visitors
+
+    @property
+    def animals_born(self) -> int:
+        """Total animals born since the zoo opened."""
+        return self._animals_born
+
+    @property
+    def animals_died(self) -> int:
+        """Total animals that have died since the zoo opened."""
+        return self._animals_died
+
     def __str__(self) -> str:
         alive = len(self.get_alive_animals())
         return (

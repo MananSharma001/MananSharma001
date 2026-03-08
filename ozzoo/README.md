@@ -74,18 +74,20 @@ The GUI provides:
 
 | Tab | What you can do |
 |---|---|
-| 🐾 **Animals** | View all animals (health colour-coded), feed, medicate, buy, move to enclosure, make perform |
-| 🏠 **Enclosures** | View cleanliness (colour-coded), clean, upgrade, build new enclosure |
-| 🛒 **Resources** | View food & medicine stock, buy food, buy medicine |
-| 💰 **Finances** | Full financial report, set ticket price, view income / expense breakdown |
-| 📋 **Event Log** | See all zoo events from the current session |
+| 📊 **Dashboard** | Live KPI tiles (Balance, Day, Animals, Score) + canvas welfare meters + zoo statistics |
+| 🐾 **Animals** | Sortable treeview; select a row for individual stat bars; feed, medicate, buy, move, make perform |
+| 🏠 **Enclosures** | Cleanliness & occupancy bars; clean, upgrade, build new enclosure |
+| 🛒 **Resources** | Canvas progress bars per food/medicine type; inline buy buttons |
+| 💰 **Finances** | KPI tiles (balance, income, expenses, ticket price) + scrollable transaction ledger |
+| 📋 **Event Log** | Colour-coded daily reports (Birth / Death / Welfare / Finance / Random / Habitat) |
 
 **Footer controls (always visible):**
 
-- **Advance Day ➜** — simulate one full day (visitors arrive, animals tick, random events fire); a popup shows the daily report
-- **Save Game** — save to `ozzoo_save.json`
-- **Load Game** — restore from `ozzoo_save.json`
-- **Quit** — exit with confirmation
+- **⏩ Advance Day** — simulate one full day; a popup shows the colour-coded daily report
+- **💾 Save** — save to `ozzoo_save.json`
+- **📂 Load** — restore from `ozzoo_save.json`
+- **❓ How to Play** — opens the in-game help guide with 9 detailed sections
+- **Quit** — exit with confirmation and final score
 
 ### Running in VS Code
 
@@ -143,45 +145,268 @@ python main.py --gui
 
 ---
 
-## How to Play (User Guide)
+## How to Play — Complete Guide
 
-When the game starts you are presented with the **Main Menu**:
+> **In-game shortcut:** Click the **❓ How to Play** button in the GUI footer at any time to open
+> the interactive help dialog with the same information below, searchable by section.
+
+### 🎮 Overview
+
+You are the manager of **OzZoo**, an Australian wildlife zoo.  Your zoo starts on **Day 0** with:
+
+- **8 animals** — 2 Red Kangaroos, 2 Koalas, 2 Little Penguins, 1 Saltwater Crocodile, 1 Wedge-tailed Eagle
+- **4 enclosures** — Kangaroo Paddock, Koala Corner, Penguin Cove, Reptile House
+- **$10,000 AUD** starting balance
+- **Ticket price** set to $25.00
+
+The game has **no fixed end date** — play for as many days as you like and aim for the highest **Score** possible.
+
+---
+
+### 📊 Dashboard
+
+The Dashboard is your central command centre, always showing:
+
+| Element | What it means |
+|---|---|
+| **Balance** | Your current cash in AUD — never let it reach $0! |
+| **Day** | How many days your zoo has been open |
+| **Animals** | Number of living animals |
+| **Score** | Your overall rating (see [Scoring](#-scoring--winning)) |
+| **Health bar** | Average animal health (0–100) |
+| **Hunger bar** | Average hunger (higher = more hungry = bad!) |
+| **Happiness bar** | Average animal happiness (0–100) |
+
+Bar colours:  🟢 **Green ≥ 70** = great  ·  🟠 **Orange 30–69** = caution  ·  🔴 **Red < 30** = take action now!
+
+---
+
+### 🔁 The Daily Loop
+
+Each time you press **⏩ Advance Day**:
+
+1. Every animal gets **+10 hunger** and **−3 happiness**
+2. Every enclosure loses **10 cleanliness**
+3. Visitors arrive and pay for tickets → revenue deposited
+4. Breeding check fires — animals in shared enclosures may produce babies
+5. Dead animals (health = 0) are removed
+6. A **25% chance** of a random event (see [Random Events](#-random-events))
+7. Your **Score** recalculates
+8. The Daily Report popup summarises everything
+
+**Your job:** before and after each day, keep animals fed, enclosures clean, and finances healthy.
+
+---
+
+### 🐾 Animals Tab
+
+The treeview lists every living animal.  Click any column heading to sort.  Select a row to see
+individual **canvas stat bars** in the detail panel.
+
+#### Actions
+
+| Button | What it does | Cost |
+|---|---|---|
+| 🍖 **Feed** | Reduces hunger, boosts happiness.  Requires food stock matching the animal's type. | ~$2–8 / unit consumed |
+| 💊 **Medicate** | Restores health.  Choose a medicine type (see table below). | Per dose |
+| 🎭 **Make Perform** | Triggers the animal's special ability (jump, swim, soar…) — boosts visitor satisfaction. | Free |
+| 🚚 **Move** | Transfer to a different enclosure.  Pair same-species animals to enable breeding. | Free |
+| 🛒 **Buy New** | Purchase a new animal from the market. | See table |
+
+#### Animal Purchase Prices
+
+| Species | Price (AUD) | Required Food | Special Ability |
+|---|---|---|---|
+| Snake | $250 | insects | slither() |
+| Emu | $300 | grass | run() |
+| Penguin | $350 | fish | swim(), waddle() |
+| Koala | $400 | fruit / grass | climb() |
+| Kangaroo | $500 | grass | jump(), box() |
+| Eagle | $600 | meat | soar() |
+| Crocodile | $800 | meat | snap() |
+
+#### Daily Animal Mechanics
+
+| What happens | Per day |
+|---|---|
+| Hunger increases | +10 |
+| Happiness decreases | −3 |
+| Consecutive hungry days (hunger > 80) | Health −10 per day after day 2 |
+| Very unhappy (happiness < 20) | Health −5 per day |
+| Health reaches 0 | Animal dies permanently |
+
+> **Feed animals before hunger exceeds ~70** — at hunger > 80 for two days in a row, health
+> starts dropping fast.
+
+#### Medicine Reference
+
+| Medicine | Cost / dose | HP restored | Best for |
+|---|---|---|---|
+| Antibiotic | $20 | +30 | Moderate illness |
+| Vitamin | $8 | +10 | Maintenance / mild boost |
+| Painkiller | $12 | +15 | Pain relief |
+| **Vaccine** | **$25** | **+40** | **Best value — use after outbreaks** |
+
+---
+
+### 🏠 Enclosures Tab
+
+| Action | Cost | Effect |
+|---|---|---|
+| 🧹 **Clean** | $50 | Restores cleanliness to 100 |
+| 🔧 **Upgrade** | $500 | +1 upgrade level — improves animal happiness and visitor satisfaction |
+| 🏗️ **Build New** | $1,000 + $2/m² | Creates a new enclosure of chosen habitat type |
+
+#### Cleanliness Rules
+
+- Enclosures lose **10 cleanliness per day**
+- Below **30 cleanliness** → animals lose happiness
+- Clean every 2–3 days to stay above 50
+
+#### Breeding
+
+When two animals of the **same species** share one enclosure there is a daily chance of a free
+baby being born.  This is the cheapest way to grow your collection.
+
+---
+
+### 🛒 Resources Tab
+
+Keep stock levels in the green.  Progress bars turn red when critically low.
+
+#### Food Prices
+
+| Food | Price / unit | Fed to |
+|---|---|---|
+| Grass | $2.00 | Kangaroos, Koalas, Emus |
+| Fruit | $3.00 | Koalas |
+| Insects | $1.50 | Snakes |
+| Fish | $6.00 | Penguins |
+| Meat | $8.00 | Crocodiles, Eagles |
+
+> **Tip:** Buy grass and fruit in batches of 50+ (cheapest types).  Keep ≥5 vaccine doses in stock.
+
+---
+
+### 💰 Finances Tab
+
+#### Revenue
+
+- **Ticket sales** — daily visitors × ticket price.  Visitor count ≈ `20 + (avg_health / 5)` ± random variance.
+- **Donations** — from Zoo Celebration and Donation Drive random events ($200–$2,000).
+
+#### Setting Ticket Price
+
+Higher price = more revenue per visitor.  But unhappy animals mean fewer visitors.
+**Optimal range: $20–$35 AUD.**
+
+#### Expense Categories
+
+| Category | Typical cost |
+|---|---|
+| Animal purchase | $250–$800 per animal |
+| Food | $1.50–$8.00 per unit |
+| Medicine | $8–$25 per dose |
+| Cleaning | $50 per enclosure |
+| Enclosure upgrade | $500 per level |
+| New enclosure | $1,000 + $2/m² |
+| Escape fine (random) | $100–$500 |
+
+> **Warning:** Balance below **$1,000 AUD** triggers a LOW FUNDS alert.  At $0 you cannot
+> buy anything and the zoo will slowly collapse.
+
+---
+
+### ⚡ Random Events
+
+Each day has a **25% chance** of triggering one random event:
+
+| Event | Effect | Strategy |
+|---|---|---|
+| 🌡️ **Heatwave** | All animals −5 HP, −10 happiness | Feed and medicate immediately after |
+| 🎉 **Zoo Celebration** | Bonus donation +$200–$800 | Great day — enjoy it! |
+| 🚨 **Animal Escape** | Fine of $100–$500 | Keep $1,500+ buffer in the bank |
+| 🦠 **Disease Outbreak** | One enclosure's animals lose 10–25 HP each | Vaccinate/medicate immediately |
+| 💝 **Donation Drive** | Large donation +$300–$2,000 | Best event possible |
+| 🍼 **Baby Boom** | 1–3 free baby animals added | Free growth — great! |
+
+---
+
+### 🏆 Scoring & Winning
+
+Your **Score** recalculates every time you advance a day using this formula:
 
 ```
-=== OzZoo Management System ===
-Day: X | Funds: $X | Visitors Today: X
+Score = avg_health    × 0.35
+      + avg_happiness × 0.25
+      + avg_visitor_satisfaction × 0.20
+      + unique_species × 5
+      + financial_score × 0.20
 
-[1]  View Zoo Status
-[2]  Manage Animals
-[3]  Manage Enclosures
-[4]  Manage Resources
-[5]  Manage Finances
-[6]  Advance Day  ➜
-[7]  View Event Log
-[8]  Save Game
-[9]  Load Game
-[0]  Quit
+financial_score = min(100, balance / $1,000 × 10)
+                  → $10,000 balance = perfect score of 100
 ```
 
-### Daily Gameplay Loop
+#### Score Tiers
 
-1. **Advance Day [6]** — press 6 to simulate one day.  Animals get hungrier, visitors arrive,
-   finances update, and random events may fire.
-2. **Feed your animals [2c]** — if animals are hungry (hunger > 20) you *must* feed them or
-   their health will drop.
-3. **Clean enclosures [3c]** — dirty enclosures make animals unhappy.
-4. **Monitor finances [5]** — ticket revenue comes in every day, but food, medicine, and
-   upkeep cost money.
-5. **Buy more animals [2b]** — use the Factory to purchase new species and grow your zoo.
-6. **Save regularly [8]** — save to `ozzoo_save.json` and reload anytime.
+| Score | Rating |
+|---|---|
+| 0–49 | 😟 Struggling zoo — animals are suffering |
+| 50–99 | 😐 Average zoo — room for improvement |
+| 100–149 | 😊 Good zoo — visitors are happy |
+| 150–199 | 😄 Great zoo — thriving animals and strong finances |
+| **200+** | **🏆 Elite zoo — Australian wildlife paradise!** |
 
-### Tips
+#### How to Maximise Your Score
 
-- Keep animal **health > 30** to avoid welfare alerts.
-- Keep animal **happiness > 60** to attract more visitors (more revenue).
-- Two healthy, happy animals of the same species in the same enclosure have a **10 % chance**
-  of producing a baby each day.
-- Random events (heatwave, disease, donations) occur with a **25 % daily probability**.
+1. Keep **all** animals at Health ≥ 70 and Hunger < 30
+2. Clean enclosures every **2–3 days** ($50 each — cheap!)
+3. Collect **all 7 species** for maximum diversity bonus (×5 pts each)
+4. Keep your balance well above **$10,000** for the max financial score
+5. Set ticket price at **$25–$30** for optimal visitor flow
+6. **Breed** animals cheaply via shared enclosures (pair same species)
+7. **Upgrade** enclosures to boost visitor satisfaction
+8. After a Disease Outbreak, **vaccinate immediately** to prevent deaths
+
+---
+
+### 💡 Quick-Start Walkthrough
+
+#### Day 0 (Before Advancing)
+
+1. Open the **Animals** tab — all 8 animals start at full health (100 HP), hunger 0, happiness 80.
+2. Note the **Dashboard**: Balance $10,000, Day 0, Score 0.
+3. Optionally buy an extra species for early diversity bonus (try a Snake at $250).
+
+#### Day 1
+
+1. Press **⏩ Advance Day** — the Daily Report popup appears showing:
+   - Visitor count and ticket revenue
+   - Any births or random events
+   - New balance and score
+2. After closing the popup, check the **Animals** tab — hunger is now 10, happiness 77.
+3. No action needed yet.  Advance another day.
+
+#### Days 2–5
+
+- **Feed every animal** as hunger approaches 70 (select animal → 🍖 Feed).
+- Check **Enclosures** — cleanliness is dropping.  Clean any below 50 ($50).
+- If a random event hit (heatwave/disease), medicate affected animals.
+- Consider buying a second species (Penguin or Emu) for the +5 score bonus.
+
+#### Days 6–15
+
+- Experiment with **ticket price** on the Finances tab — try $28–$32.
+- Put two Kangaroos or two Koalas in the **same enclosure** for free breeding.
+- Build a second enclosure if you have more animals than capacity ($1,200+ for a 200 m² enclosure).
+- Target **Score 100+** by day 10.
+
+#### Long Term
+
+- Collect all **7 species** for the maximum diversity bonus.
+- Keep **$2,000+ cash buffer** to absorb escape fines and outbreaks.
+- Target **Score 200+** by day 30.
+- **💾 Save regularly** — save to `ozzoo_save.json` and reload anytime.
 
 ---
 

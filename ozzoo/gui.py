@@ -397,6 +397,419 @@ class _MedicateDialog(_BaseDialog):
 
 
 # ---------------------------------------------------------------------------
+# How-to-Play dialog
+# ---------------------------------------------------------------------------
+
+# ── Content is defined as (heading, body_lines) tuples per section ────────
+# Line prefix markers used by _HelpDialog._show_section() for colour coding:
+#   "## " → subheading (cyan)   "++ " → good (green)   "!! " → danger (red)
+#   "~~ " → warning (orange)    ">> " → highlight (yellow)   (no prefix) → plain
+_HELP_SECTIONS = [
+    (
+        "🎮  Overview",
+        [
+            "Welcome to OzZoo — Australian Zoo Management!",
+            "",
+            "You are the manager of an Australian wildlife zoo.  Your goal is to",
+            "build and maintain a thriving zoo by:",
+            "  • Keeping your animals healthy, fed, and happy",
+            "  • Attracting visitors and maximising ticket revenue",
+            "  • Expanding your enclosures and growing your animal collection",
+            "  • Surviving random events and managing your finances",
+            "",
+            "The game has no fixed end date — play as long as you like and aim",
+            "for the highest Score possible.",
+        ],
+    ),
+    (
+        "📊  Dashboard",
+        [
+            "The Dashboard gives you a live overview of your zoo:",
+            "",
+            "## KPI Tiles (top row)",
+            "  ─────────────────",
+            "  • Balance    — Your current cash in AUD.  Never let it hit $0!",
+            "  • Day        — How many days your zoo has been open.",
+            "  • Animals    — Number of living animals in your zoo.",
+            "  • Score      — Your overall performance rating (see Scoring).",
+            "",
+            "## Average Animal Welfare (left panel)",
+            "  ────────────────────────────────────",
+            "  • Health     — Average health across all animals (0-100).",
+            "  • Hunger     — Average hunger level.  High hunger is bad!",
+            "  • Happiness  — Average happiness across all animals (0-100).",
+            "",
+            "  Bar colours:",
+            "++ Green (≥70) = great   — no action needed",
+            "~~ Orange (30–69) = caution  — monitor closely",
+            "!! Red (<30) = critical  — take immediate action!",
+            "",
+            "## Zoo Statistics (right panel)",
+            "  ────────────────────────────",
+            "  Cumulative visitor count, ticket price, births, deaths, and",
+            "  number of enclosures.",
+        ],
+    ),
+    (
+        "🐾  Animals",
+        [
+            "The Animals tab lists every living animal in your zoo.",
+            "",
+            "## Columns",
+            "  Name · Species · Age · Health (0-100) · Hunger (0-100)",
+            "  Happiness (0-100) · Required Food",
+            "",
+            "  Click any column heading to sort ascending / descending.",
+            "  Select a row → the right-hand Detail Panel updates with",
+            "  canvas stat bars for that individual animal.",
+            "",
+            "## Actions (Detail Panel buttons)",
+            "  ──────────────────────────────",
+            "  🍖 Feed         — Feed the selected animal.  Reduces hunger",
+            "                    and boosts happiness.  Requires food stock",
+            "                    of the animal's type (grass / meat / fish /",
+            "                    fruit / insects).  Cost: ~$2–8/unit.",
+            "",
+            "  💊 Medicate     — Administer medicine.  Choose:",
+            "    antibiotic  $20/dose  +30 HP",
+            "    vitamin      $8/dose  +10 HP",
+            "    painkiller  $12/dose  +15 HP",
+            "++ vaccine     $25/dose  +40 HP  ← best value after outbreaks",
+            "",
+            "  🎭 Make Perform — Triggers the animal's special ability",
+            "                    and plays its sound.  Free action.",
+            "",
+            "  🚚 Move         — Transfer to a different enclosure.",
+            "                    Pair same species to enable breeding.",
+            "",
+            "  🛒 Buy New      — Purchase a new animal.  Prices:",
+            "    Snake $250  ·  Emu $300  ·  Penguin $350",
+            "    Koala $400  ·  Kangaroo $500  ·  Eagle $600",
+            "    Crocodile $800",
+            "",
+            "## Daily mechanics per animal",
+            "!! Every day: hunger +10, happiness -3.",
+            "!! Hunger > 80 for 2 consecutive days → health -10/day.",
+            "!! Happiness < 20 → health -5/day.",
+            "!! Health reaches 0 → animal dies permanently.",
+        ],
+    ),
+    (
+        "🏠  Enclosures",
+        [
+            "Enclosures house your animals and degrade over time.",
+            "",
+            "## Columns",
+            "  ID · Name · Habitat Type · Animals (current) · Capacity",
+            "  Cleanliness (0-100) · Upgrade Level",
+            "",
+            "  Select a row → Detail Panel shows canvas bars for",
+            "  Cleanliness and Occupancy %.",
+            "",
+            "## Actions",
+            "  🧹 Clean       — Restores cleanliness to 100.  Cost: $50.",
+            "~~ Enclosures lose 10 cleanliness per day.",
+            "!! Below 30 cleanliness → animals lose happiness.",
+            "  Recommended: clean every 2–3 days.",
+            "",
+            "  🔧 Upgrade     — Increases upgrade level by 1.  Cost: $500.",
+            "                   Higher levels improve animal happiness and",
+            "                   visitor satisfaction ratings.",
+            "",
+            "  🏗️ Build New   — Construct a new enclosure.",
+            "                   Cost: $1,000 + $2 per m² of area.",
+            "                   Match the habitat type to your animals'",
+            "                   natural environment.",
+            "",
+            "## Breeding",
+            "  When two animals of the same species share an enclosure,",
+            "  there is a daily chance of a new baby being born for free!",
+            "++ This is one of the best ways to grow your collection",
+            "++ without spending any money.",
+        ],
+    ),
+    (
+        "🛒  Resources",
+        [
+            "Keep your food and medicine stocked — running out is dangerous.",
+            "",
+            "## Food Types & Prices",
+            "  Grass    $2.00 / unit   — Kangaroos, Koalas, Emus",
+            "  Fruit    $3.00 / unit   — Koalas",
+            "  Insects  $1.50 / unit   — Cheapest option (Snakes)",
+            "  Fish     $6.00 / unit   — Penguins",
+            "  Meat     $8.00 / unit   — Crocodiles, Eagles",
+            "",
+            "  Each animal eats 1 unit of its required food per feeding.",
+            "!! Feed animals daily to keep hunger below 70.",
+            "",
+            "## Medicine Types & Prices",
+            "  Antibiotic  $20 / dose  +30 HP",
+            "  Vitamin      $8 / dose  +10 HP",
+            "  Painkiller  $12 / dose  +15 HP",
+            "++ Vaccine     $25 / dose  +40 HP  ← best value per HP",
+            "",
+            "  Progress bars turn red when stock is critically low.",
+            "  Buy in bulk to save trips — but watch your balance!",
+            "",
+            ">> Tip: Buy grass and fruit in batches of 50+ (cheapest)",
+            ">> and keep at least 5 vaccine doses on hand at all times.",
+        ],
+    ),
+    (
+        "💰  Finances",
+        [
+            "Revenue comes in every time you advance a day.",
+            "",
+            "## Income Sources",
+            "  Ticket Sales   — Daily visitors × ticket price.",
+            "                   Visitor count ≈ 20 + (avg_health / 5)",
+            "                   ± random variance each day.",
+            "                   Default ticket price: $25.00 AUD.",
+            "",
+            "  Donations      — Received from Zoo Celebration and",
+            "                   Donation Drive random events ($200–$2,000).",
+            "",
+            "## Setting Ticket Price",
+            "  Higher price → more revenue per visitor.",
+            "  Fewer happy animals → fewer visitors.",
+            ">> Optimal ticket price: $20–$35 to keep visitors coming.",
+            "",
+            "## Expenses",
+            "  Animal purchases · Food · Medicine · Cleaning ($50) ·",
+            "  Enclosure upgrades ($500) · Construction ($1,000+) ·",
+            "  Escape fines ($100–$500 random event)",
+            "",
+            "!! Balance below $1,000 AUD → LOW FUNDS alert fires.",
+            "!! Balance reaches $0 → cannot buy anything; zoo collapses.",
+            "",
+            "## Ledger",
+            "  The Recent Transactions treeview shows the last 20",
+            "  transactions in green (income) and red (expense).",
+        ],
+    ),
+    (
+        "⚡  Random Events",
+        [
+            "Each day has a 25% chance of a random event.  Be prepared!",
+            "",
+            "## 🌡️  Heatwave",
+            "   All animals -5 health, -10 happiness.",
+            ">> Remedy: medicate and feed immediately after.",
+            "",
+            "## 🎉  Zoo Celebration",
+            "++ Bonus donation $200–$800 AUD.  Great day!",
+            "",
+            "## 🚨  Animal Escape",
+            "~~ Fine of $100–$500 AUD to recapture the animal.",
+            ">> Keep $1,500+ in the bank to absorb this cost.",
+            "",
+            "## 🦠  Disease Outbreak",
+            "!! Animals in one random enclosure lose 10–25 HP each.",
+            ">> Remedy: immediately vaccinate/medicate affected animals.",
+            "",
+            "## 💝  Donation Drive",
+            "++ Large donation of $300–$2,000 AUD.  Best event!",
+            "",
+            "## 🍼  Baby Boom",
+            "++ 1–3 random baby animals added for free.",
+        ],
+    ),
+    (
+        "🏆  Scoring & Winning",
+        [
+            "Your Score updates every time you advance a day.",
+            "",
+            "## Score Formula",
+            "  Score =  avg_health    × 0.35  (0–100)",
+            "         + avg_happiness × 0.25  (0–100)",
+            "         + avg_visitor_sat × 0.20  (visitor satisfaction)",
+            "         + unique_species × 5     (species diversity bonus)",
+            "         + financial_score × 0.20 (capped at 100)",
+            "",
+            "  financial_score = min(100, balance / $1,000 × 10)",
+            "++ $10,000 balance = perfect financial score of 100",
+            "",
+            "## Score Tiers",
+            "   0–49    Struggling zoo — animals are suffering",
+            "   50–99   Average zoo — room for improvement",
+            "   100–149 Good zoo — visitors are happy",
+            "   150–199 Great zoo — thriving animals and finances",
+            "++ 200+    Elite zoo — Australian wildlife paradise! 🏆",
+            "",
+            "## How to maximise your score",
+            ">> 1. Keep ALL animals at Health ≥ 70 and Hunger < 30",
+            ">> 2. Clean enclosures regularly (every 2–3 days: $50 each)",
+            ">> 3. Collect all 7 species for max diversity bonus (×5 each)",
+            ">> 4. Keep balance above $10,000 for max financial score",
+            ">> 5. Set ticket price at $25–$30 for optimal visitor flow",
+            ">> 6. Breed animals cheaply via shared enclosures",
+            ">> 7. Upgrade enclosures to boost visitor satisfaction",
+            ">> 8. After a Disease Outbreak, vaccinate immediately",
+        ],
+    ),
+    (
+        "💡  Quick-Start Tips",
+        [
+            "## Day 0 (before advancing)",
+            "  Your zoo starts with 8 animals, 4 enclosures, $10,000.",
+            "  All animals are at full health (100 HP), hunger 0, happiness 80.",
+            "",
+            "## Day 1",
+            "  Press Advance Day — read the Daily Report popup.",
+            "  Animals: hunger now 10, happiness 77.  No action needed yet.",
+            "",
+            "## Days 2–5",
+            ">> Feed every animal as hunger approaches 70.",
+            ">> Clean enclosures when cleanliness drops below 50 ($50 each).",
+            "~~ If a random event hit, medicate affected animals immediately.",
+            ">> Consider buying a second species for the +5 score bonus.",
+            "",
+            "## Days 6–15",
+            ">> Experiment with ticket price — try $28–$32 on the Finances tab.",
+            ">> Put two Kangaroos or Koalas in one enclosure for free breeding.",
+            ">> Build a new enclosure if animals exceed capacity ($1,200+).",
+            "++ Target Score 100+ by day 10.",
+            "",
+            "## Long term",
+            ">> Collect all 7 species for maximum diversity bonus.",
+            ">> Keep $2,000+ cash buffer against escapes and outbreaks.",
+            "++ Target Score 200+ by day 30.",
+            ">> Save your game regularly with the Save button.",
+        ],
+    ),
+]
+
+
+class _HelpDialog(tk.Toplevel):
+    """
+    Scrollable, tabbed How-to-Play reference dialog.
+
+    Opens as a modal window with a sidebar list of sections and a
+    right-hand content area that updates when a section is selected.
+    """
+
+    _WIDTH  = 820
+    _HEIGHT = 560
+
+    def __init__(self, parent: tk.Widget) -> None:
+        super().__init__(parent)
+        self.title("❓  How to Play OzZoo")
+        self.configure(bg=_BG)
+        self.resizable(True, True)
+        self.geometry(f"{self._WIDTH}x{self._HEIGHT}")
+        self.grab_set()
+        self._build()
+
+    # ------------------------------------------------------------------
+    def _build(self) -> None:
+        # ── Header ────────────────────────────────────────────────────
+        hdr = tk.Frame(self, bg=_ACCENT, pady=10)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="❓  How to Play OzZoo — Complete Guide",
+                 bg=_ACCENT, fg=_GOLD, font=FONT_HEAD).pack()
+
+        # ── Body: sidebar + content ────────────────────────────────────
+        body = tk.Frame(self, bg=_BG)
+        body.pack(fill="both", expand=True, padx=8, pady=6)
+
+        # Sidebar list-box
+        sidebar = tk.Frame(body, bg=_PANEL, width=190)
+        sidebar.pack(side="left", fill="y", padx=(0, 6))
+        sidebar.pack_propagate(False)
+
+        tk.Label(sidebar, text="Sections", bg=_PANEL, fg=_GOLD,
+                 font=FONT_BOLD9).pack(anchor="w", padx=8, pady=(8, 4))
+
+        self._listbox = tk.Listbox(
+            sidebar,
+            bg=_PANEL, fg=_FG, selectbackground=_BTN_RED,
+            selectforeground="#fff", activestyle="none",
+            relief="flat", font=FONT_SMALL, borderwidth=0,
+            highlightthickness=0,
+        )
+        for heading, _ in _HELP_SECTIONS:
+            self._listbox.insert("end", f"  {heading}")
+        self._listbox.pack(fill="both", expand=True, padx=4, pady=(0, 8))
+        self._listbox.bind("<<ListboxSelect>>", self._on_select)
+
+        # Content area
+        content_frame = tk.Frame(body, bg=_BG)
+        content_frame.pack(side="left", fill="both", expand=True)
+
+        self._section_title = tk.Label(
+            content_frame, text="", bg=_BG, fg=_GOLD, font=FONT_HEAD,
+            anchor="w",
+        )
+        self._section_title.pack(anchor="w", padx=6, pady=(4, 6))
+
+        self._text = tk.Text(
+            content_frame, bg=_CARD, fg=_FG, insertbackground=_FG,
+            relief="flat", font=FONT_MONO, state="disabled",
+            wrap="word", padx=12, pady=10,
+        )
+        vsb = ttk.Scrollbar(content_frame, orient="vertical",
+                             command=self._text.yview)
+        self._text.configure(yscrollcommand=vsb.set)
+        self._text.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
+
+        # Configure text tags for colour highlights
+        self._text.tag_configure("heading",    foreground=_GOLD,   font=FONT_BOLD9)
+        self._text.tag_configure("subheading", foreground=_CYAN,   font=FONT_BOLD9)
+        self._text.tag_configure("good",       foreground=_GREEN)
+        self._text.tag_configure("warn",       foreground=_ORANGE)
+        self._text.tag_configure("danger",     foreground=_RED)
+        self._text.tag_configure("highlight",  foreground=_YELLOW)
+
+        # Footer close button
+        foot = tk.Frame(self, bg=_ACCENT, pady=8)
+        foot.pack(fill="x", side="bottom")
+        _btn(foot, "Close", self.destroy, bg=_BTN_BLU).pack()
+
+        # Select first section by default
+        self._listbox.selection_set(0)
+        self._show_section(0)
+
+    # ------------------------------------------------------------------
+    def _on_select(self, _event=None) -> None:
+        sel = self._listbox.curselection()
+        if sel:
+            self._show_section(sel[0])
+
+    def _show_section(self, idx: int) -> None:
+        heading, lines = _HELP_SECTIONS[idx]
+        self._section_title.config(text=heading)
+
+        self._text.configure(state="normal")
+        self._text.delete("1.0", "end")
+
+        # Prefix markers embedded in _HELP_SECTIONS data drive colour tags:
+        #   "## " → subheading (cyan)    "++ " → good (green)
+        #   "!! " → danger (red)         "~~ " → warning (orange)
+        #   ">> " → highlight (yellow)   (no prefix) → plain text
+        _PREFIX_TAG = {
+            "## ": "subheading",
+            "++ ": "good",
+            "!! ": "danger",
+            "~~ ": "warn",
+            ">> ": "highlight",
+        }
+        for line in lines:
+            tag = ""
+            display = line
+            for prefix, t in _PREFIX_TAG.items():
+                if line.startswith(prefix):
+                    tag = t
+                    display = line[len(prefix):]
+                    break
+            self._text.insert("end", display + "\n", tag)
+
+        self._text.configure(state="disabled")
+        self._text.see("1.0")
+
+
+# ---------------------------------------------------------------------------
 # Main GUI application
 # ---------------------------------------------------------------------------
 
@@ -497,6 +910,8 @@ class OzZooGUI:
              bg=_BTN_RED).pack(side="left", padx=14)
         _btn(foot, "💾 Save", self._do_save, bg=_BTN_BLU).pack(side="left", padx=4)
         _btn(foot, "📂 Load", self._do_load, bg=_BTN_BLU).pack(side="left", padx=4)
+        _btn(foot, "❓ How to Play", self._do_help,
+             bg=_BTN_BLU).pack(side="left", padx=10)
         _btn(foot, "Quit", self._do_quit, bg="#444").pack(side="right", padx=14)
         self._score_var = tk.StringVar(value="Score: 0")
         tk.Label(foot, textvariable=self._score_var, bg=_ACCENT,
@@ -1373,6 +1788,10 @@ class OzZooGUI:
             messagebox.showinfo("Load Game", f"Game loaded from '{SAVE_FILE}'.")
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
+
+    def _do_help(self) -> None:
+        """Open the How to Play dialog."""
+        _HelpDialog(self._root)
 
     def _do_quit(self) -> None:
         if messagebox.askyesno("Quit OzZoo",

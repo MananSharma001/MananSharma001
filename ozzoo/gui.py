@@ -41,6 +41,8 @@ from game_loop import GameLoop               # noqa: E402
 from patterns.factory import AnimalFactory   # noqa: E402
 from finance import Finance                  # noqa: E402
 from exceptions import OzZooException        # noqa: E402
+from achievements import AchievementTracker, ACHIEVEMENTS, Achievement  # noqa: E402
+from challenges import ChallengeTracker, DailyChallenge  # noqa: E402
 
 SAVE_FILE = "ozzoo_save.json"
 
@@ -394,6 +396,175 @@ class _MedicateDialog(_BaseDialog):
     def _ok(self):
         self.result = self._med_var.get()
         self.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Utility: star rating
+# ---------------------------------------------------------------------------
+
+def _stars(score: int) -> str:
+    """Return a ★/☆ string representing the zoo star rating (1–5 stars)."""
+    if score >= 250:
+        filled = 5
+    elif score >= 180:
+        filled = 4
+    elif score >= 110:
+        filled = 3
+    elif score >= 50:
+        filled = 2
+    else:
+        filled = 1
+    return "★" * filled + "☆" * (5 - filled)
+
+
+# ---------------------------------------------------------------------------
+# Toast notification widget
+# ---------------------------------------------------------------------------
+
+class _Toast:
+    """
+    Transient slide-in banner shown at the top-right of the root window.
+
+    Usage::
+        _Toast.show(root, "🏆  Achievement unlocked: Elite Zoo!", colour="#f9a825")
+    """
+    _DURATION_MS = 3500   # how long the toast is visible
+    _SLIDE_STEPS = 12     # animation frames for slide-in
+    _SLIDE_DELAY = 16     # ms between animation frames
+
+    @classmethod
+    def show(cls, root: tk.Tk, message: str,
+             colour: str = "#f9a825", bg: str = "#0f3460") -> None:
+        win = tk.Toplevel(root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=bg)
+
+        lbl = tk.Label(win, text=message, bg=bg, fg=colour,
+                       font=("Helvetica", 10, "bold"),
+                       padx=16, pady=10, wraplength=320, justify="left")
+        lbl.pack()
+
+        # Position: top-right of root window
+        root.update_idletasks()
+        rx = root.winfo_x() + root.winfo_width()
+        ry = root.winfo_y() + 60
+        w  = 340
+        h  = 60
+
+        # Slide in from right
+        def _slide(step: int = 0) -> None:
+            if not win.winfo_exists():
+                return
+            progress = min(1.0, step / cls._SLIDE_STEPS)
+            x = int(rx - w * progress)
+            win.geometry(f"{w}x{h}+{x}+{ry}")
+            if step < cls._SLIDE_STEPS:
+                root.after(cls._SLIDE_DELAY, _slide, step + 1)
+            else:
+                root.after(cls._DURATION_MS, lambda: cls._dismiss(win, root, rx, ry, w, h))
+
+        win.geometry(f"{w}x{h}+{rx}+{ry}")
+        _slide()
+
+    @classmethod
+    def _dismiss(cls, win: tk.Toplevel, root: tk.Tk,
+                 rx: int, ry: int, w: int, h: int) -> None:
+        """Slide the toast back out to the right."""
+        def _slide_out(step: int = 0) -> None:
+            if not win.winfo_exists():
+                return
+            progress = min(1.0, step / cls._SLIDE_STEPS)
+            x = int(rx - w + w * progress)
+            win.geometry(f"{w}x{h}+{x}+{ry}")
+            if step < cls._SLIDE_STEPS:
+                root.after(cls._SLIDE_DELAY, _slide_out, step + 1)
+            else:
+                win.destroy()
+        _slide_out()
+
+
+# ---------------------------------------------------------------------------
+# Achievement Gallery dialog
+# ---------------------------------------------------------------------------
+
+class _AchievementsDialog(tk.Toplevel):
+    """Modal gallery showing all achievements and their unlock status."""
+
+    def __init__(self, parent: tk.Widget,
+                 tracker: "AchievementTracker") -> None:
+        super().__init__(parent)
+        self.title("🏅  Achievements")
+        self.configure(bg=_BG)
+        self.resizable(True, True)
+        self.geometry("720x520")
+        self.grab_set()
+        self._tracker = tracker
+        self._build()
+
+    def _build(self) -> None:
+        # Header
+        hdr = tk.Frame(self, bg=_ACCENT, pady=10)
+        hdr.pack(fill="x")
+        count   = self._tracker.unlocked_count
+        total   = self._tracker.total_count
+        pct     = round(count / total * 100) if total else 0
+        tk.Label(hdr, text=f"🏅  Achievements  —  {count}/{total} unlocked  ({pct}%)",
+                 bg=_ACCENT, fg=_GOLD, font=FONT_HEAD).pack()
+
+        # Scrollable grid
+        container = tk.Frame(self, bg=_BG)
+        container.pack(fill="both", expand=True, padx=10, pady=8)
+
+        canvas = tk.Canvas(container, bg=_BG, highlightthickness=0)
+        vsb    = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = tk.Frame(canvas, bg=_BG)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        unlocked = self._tracker.unlocked_keys
+        # 3 columns here (dialog is 720 px wide) vs 4 in the tab (full window width)
+        cols = 3
+        for idx, ach in enumerate(ACHIEVEMENTS):
+            row, col = divmod(idx, cols)
+            locked = ach.key not in unlocked
+            card_bg = _PANEL if not locked else _CARD
+            fg_main = _FG if not locked else _FG2
+            fg_sub  = _FG2 if not locked else "#555"
+
+            card = tk.Frame(inner, bg=card_bg, padx=10, pady=8,
+                            relief="flat", bd=0,
+                            highlightbackground=(_GOLD if not locked else "#2a2a4a"),
+                            highlightthickness=1)
+            card.grid(row=row, column=col, padx=6, pady=5, sticky="nsew")
+            inner.columnconfigure(col, weight=1)
+
+            top = tk.Frame(card, bg=card_bg)
+            top.pack(fill="x")
+            icon_lbl = tk.Label(top, text=ach.icon if not locked else "🔒",
+                                bg=card_bg, fg=_GOLD if not locked else _FG2,
+                                font=("Helvetica", 18))
+            icon_lbl.pack(side="left", padx=(0, 8))
+            tk.Label(top, text=ach.title, bg=card_bg,
+                     fg=fg_main, font=FONT_BOLD9).pack(side="left", anchor="w")
+
+            tk.Label(card, text=ach.description, bg=card_bg,
+                     fg=fg_sub, font=FONT_SMALL,
+                     wraplength=180, justify="left").pack(anchor="w")
+            if ach.reward > 0:
+                reward_fg = _GREEN if not locked else _FG2
+                tk.Label(card, text=f"Reward: +${ach.reward:,.0f} AUD",
+                         bg=card_bg, fg=reward_fg, font=FONT_SMALL).pack(anchor="w")
+
+        # Footer
+        foot = tk.Frame(self, bg=_ACCENT, pady=8)
+        foot.pack(fill="x", side="bottom")
+        _btn(foot, "Close", self.destroy, bg=_BTN_BLU).pack()
 
 
 # ---------------------------------------------------------------------------
@@ -819,14 +990,16 @@ class OzZooGUI:
 
     Layout
     ------
-    Header  — live stats bar (auto-refreshed every 3 s)
-    Notebook — 6 tabs:
+    Header  — live stats bar with news ticker + star rating (auto-refreshed every 3 s)
+    Notebook — 7 tabs:
         📊 Dashboard  |  🐾 Animals  |  🏠 Enclosures
-        🛒 Resources  |  💰 Finances  |  📋 Event Log
-    Footer  — Advance Day | Save | Load | Quit + Score
+        🛒 Resources  |  💰 Finances  |  📋 Event Log  |  🏅 Achievements
+    Footer  — Advance Day | Save | Load | How to Play | Quit + Score
     """
 
-    _REFRESH_MS = 3000
+    _REFRESH_MS   = 3000
+    _TICKER_DELAY = 60    # ms per character scroll step
+    _TICKER_WIDTH = 90    # visible characters in the news ticker
 
     def __init__(self, root: tk.Tk) -> None:
         self._root = root
@@ -836,9 +1009,22 @@ class OzZooGUI:
         self._anim_sort_rev: bool = False
         self._event_lines: list[str] = []   # accumulated daily + observer events
 
+        # Addictive-gameplay systems
+        self._achievements  = AchievementTracker()
+        self._challenges    = ChallengeTracker()
+        self._no_death_streak: int   = 0
+        self._prev_score:      int   = 0
+        self._best_score:      int   = 0
+        self._ticker_msgs:     list[str] = ["Welcome to OzZoo! 🦘  Advance the day to begin!"]
+        self._ticker_pos:      int   = 0
+
+        # Daily-challenge state
+        self._current_challenge: Optional[DailyChallenge] = None
+        self._challenge_result:  Optional[tuple[bool, float]] = None
+
         root.title("🦘  OzZoo — Australian Zoo Management")
         root.configure(bg=_BG)
-        root.minsize(1040, 680)
+        root.minsize(1100, 720)  # wider than original to fit 7-tab notebook + challenge panel
 
         self._setup_styles()
         self._build_header()
@@ -846,6 +1032,8 @@ class OzZooGUI:
         self._build_footer()
         self._refresh()
         self._schedule_refresh()
+        self._schedule_ticker()
+
 
     # ------------------------------------------------------------------
     # Style setup
@@ -877,13 +1065,30 @@ class OzZooGUI:
     # ------------------------------------------------------------------
 
     def _build_header(self) -> None:
-        hdr = tk.Frame(self._root, bg=_ACCENT, pady=10)
+        hdr = tk.Frame(self._root, bg=_ACCENT, pady=6)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="🦘  OzZoo — Australian Zoo Management  🦘",
-                 bg=_ACCENT, fg=_GOLD, font=FONT_TITLE).pack()
+
+        # Title row with star rating
+        title_row = tk.Frame(hdr, bg=_ACCENT)
+        title_row.pack()
+        tk.Label(title_row, text="🦘  OzZoo — Australian Zoo Management  🦘",
+                 bg=_ACCENT, fg=_GOLD, font=FONT_TITLE).pack(side="left")
+        self._stars_var = tk.StringVar(value="  ☆☆☆☆☆")
+        tk.Label(title_row, textvariable=self._stars_var,
+                 bg=_ACCENT, fg=_GOLD, font=("Helvetica", 14)).pack(side="left", padx=(12, 0))
+
+        # Status line
         self._status_var = tk.StringVar()
         tk.Label(hdr, textvariable=self._status_var, bg=_ACCENT,
                  fg=_FG, font=FONT_BODY).pack(pady=(2, 0))
+
+        # News ticker
+        ticker_frame = tk.Frame(hdr, bg="#0d1a30", pady=3)
+        ticker_frame.pack(fill="x", padx=0, pady=(4, 0))
+        self._ticker_var = tk.StringVar(value="")
+        tk.Label(ticker_frame, textvariable=self._ticker_var,
+                 bg="#0d1a30", fg=_CYAN, font=FONT_MONO,
+                 anchor="w").pack(fill="x", padx=10)
 
     # ------------------------------------------------------------------
     # Notebook
@@ -892,12 +1097,13 @@ class OzZooGUI:
     def _build_notebook(self) -> None:
         self._nb = ttk.Notebook(self._root)
         self._nb.pack(fill="both", expand=True, padx=8, pady=(6, 2))
-        self._nb.add(self._tab_dashboard(),  text="📊  Dashboard")
-        self._nb.add(self._tab_animals(),    text="🐾  Animals")
-        self._nb.add(self._tab_enclosures(), text="🏠  Enclosures")
-        self._nb.add(self._tab_resources(),  text="🛒  Resources")
-        self._nb.add(self._tab_finances(),   text="💰  Finances")
-        self._nb.add(self._tab_eventlog(),   text="📋  Event Log")
+        self._nb.add(self._tab_dashboard(),    text="📊  Dashboard")
+        self._nb.add(self._tab_animals(),      text="🐾  Animals")
+        self._nb.add(self._tab_enclosures(),   text="🏠  Enclosures")
+        self._nb.add(self._tab_resources(),    text="🛒  Resources")
+        self._nb.add(self._tab_finances(),     text="💰  Finances")
+        self._nb.add(self._tab_eventlog(),     text="📋  Event Log")
+        self._nb.add(self._tab_achievements(), text="🏅  Achievements")
 
     # ------------------------------------------------------------------
     # Footer
@@ -910,12 +1116,18 @@ class OzZooGUI:
              bg=_BTN_RED).pack(side="left", padx=14)
         _btn(foot, "💾 Save", self._do_save, bg=_BTN_BLU).pack(side="left", padx=4)
         _btn(foot, "📂 Load", self._do_load, bg=_BTN_BLU).pack(side="left", padx=4)
+        _btn(foot, "🏅 Achievements", self._do_achievements,
+             bg="#7b1fa2").pack(side="left", padx=10)
         _btn(foot, "❓ How to Play", self._do_help,
-             bg=_BTN_BLU).pack(side="left", padx=10)
+             bg=_BTN_BLU).pack(side="left", padx=4)
         _btn(foot, "Quit", self._do_quit, bg="#444").pack(side="right", padx=14)
         self._score_var = tk.StringVar(value="Score: 0")
         tk.Label(foot, textvariable=self._score_var, bg=_ACCENT,
                  fg=_GOLD, font=FONT_HEAD).pack(side="right", padx=20)
+        # Personal-best label
+        self._best_var = tk.StringVar(value="")
+        tk.Label(foot, textvariable=self._best_var, bg=_ACCENT,
+                 fg=_GREEN, font=FONT_SMALL).pack(side="right", padx=8)
 
     # ==================================================================
     # Tab: Dashboard
@@ -951,8 +1163,37 @@ class OzZooGUI:
                     self._bar_avg_happiness):
             bar.pack(fill="x", pady=5)
 
-        stats_card = tk.Frame(mid, bg=_CARD, padx=14, pady=14)
-        stats_card.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        # Daily challenge card (inside welfare_card, below the bars)
+        sep = tk.Frame(welfare_card, bg=_ACCENT, height=1)
+        sep.pack(fill="x", pady=(12, 8))
+        tk.Label(welfare_card, text="🎯  Today's Challenge",
+                 bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w")
+        self._challenge_icon_var  = tk.StringVar(value="—")
+        self._challenge_title_var = tk.StringVar(value="Advance the day to get a challenge!")
+        self._challenge_desc_var  = tk.StringVar(value="")
+        self._challenge_status_var= tk.StringVar(value="")
+        ch_row = tk.Frame(welfare_card, bg=_CARD)
+        ch_row.pack(fill="x", pady=(4, 0))
+        tk.Label(ch_row, textvariable=self._challenge_icon_var,
+                 bg=_CARD, fg=_GOLD, font=("Helvetica", 18)).pack(side="left", padx=(0, 8))
+        right = tk.Frame(ch_row, bg=_CARD)
+        right.pack(side="left", fill="x", expand=True)
+        tk.Label(right, textvariable=self._challenge_title_var,
+                 bg=_CARD, fg=_FG, font=FONT_BOLD9, anchor="w").pack(anchor="w")
+        tk.Label(right, textvariable=self._challenge_desc_var,
+                 bg=_CARD, fg=_FG2, font=FONT_SMALL, anchor="w",
+                 wraplength=300).pack(anchor="w")
+        self._challenge_status_lbl = tk.Label(
+            welfare_card, textvariable=self._challenge_status_var,
+            bg=_CARD, font=FONT_BOLD9, anchor="w")
+        self._challenge_status_lbl.pack(anchor="w", pady=(4, 0))
+
+        # Stats + streak card
+        right_col = tk.Frame(mid, bg=_BG)
+        right_col.pack(side="left", fill="both", expand=True)
+
+        stats_card = tk.Frame(right_col, bg=_CARD, padx=14, pady=14)
+        stats_card.pack(fill="both", expand=True, pady=(0, 6))
         tk.Label(stats_card, text="📈  Zoo Statistics",
                  bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 10))
 
@@ -973,6 +1214,18 @@ class OzZooGUI:
             tk.Label(row, textvariable=var, bg=_CARD,
                      fg=_FG, font=FONT_BOLD9).pack(side="left")
             self._dash_stat_vars[key] = var
+
+        # Streak / personal best card
+        streak_card = tk.Frame(right_col, bg=_CARD, padx=14, pady=10)
+        streak_card.pack(fill="x")
+        tk.Label(streak_card, text="🔥  Streak & Records",
+                 bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 6))
+        self._dash_streak_var = tk.StringVar(value="No-death streak: 0 days")
+        self._dash_best_var   = tk.StringVar(value="Personal best: 0")
+        tk.Label(streak_card, textvariable=self._dash_streak_var,
+                 bg=_CARD, fg=_CYAN, font=FONT_BOLD9).pack(anchor="w")
+        tk.Label(streak_card, textvariable=self._dash_best_var,
+                 bg=_CARD, fg=_GOLD, font=FONT_BOLD9).pack(anchor="w")
 
         return frame
 
@@ -1259,6 +1512,111 @@ class OzZooGUI:
         return frame
 
     # ==================================================================
+    # Tab: Achievements
+    # ==================================================================
+
+    def _tab_achievements(self) -> tk.Frame:
+        frame = tk.Frame(self._root, bg=_BG)
+
+        # Header row
+        hdr = tk.Frame(frame, bg=_CARD, padx=14, pady=10)
+        hdr.pack(fill="x", padx=14, pady=(14, 6))
+        tk.Label(hdr, text="🏅  Achievements Gallery",
+                 bg=_CARD, fg=_GOLD, font=FONT_TITLE).pack(side="left")
+        self._ach_progress_var = tk.StringVar(value="0 / 0 unlocked")
+        tk.Label(hdr, textvariable=self._ach_progress_var,
+                 bg=_CARD, fg=_FG2, font=FONT_SMALL).pack(side="right")
+
+        # Scrollable grid of achievement cards
+        container = tk.Frame(frame, bg=_BG)
+        container.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+
+        canvas = tk.Canvas(container, bg=_BG, highlightthickness=0)
+        vsb    = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        self._ach_inner = tk.Frame(canvas, bg=_BG)
+        self._ach_canvas_win = canvas.create_window((0, 0), window=self._ach_inner, anchor="nw")
+        self._ach_inner.bind("<Configure>",
+                             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig(self._ach_canvas_win, width=e.width))
+        self._ach_canvas = canvas
+
+        # Challenge history panel
+        hist_frame = tk.Frame(frame, bg=_CARD, padx=14, pady=10)
+        hist_frame.pack(fill="x", padx=14, pady=(0, 10))
+        tk.Label(hist_frame, text="🎯  Challenge History",
+                 bg=_CARD, fg=_GOLD, font=FONT_HEAD).pack(anchor="w", pady=(0, 6))
+        ch_cols = ("Day", "Challenge", "Reward", "Result")
+        self._ch_hist_tree = ttk.Treeview(
+            hist_frame, columns=ch_cols, show="headings", height=5)
+        for col, w in zip(ch_cols, (50, 200, 80, 80)):
+            self._ch_hist_tree.heading(col, text=col)
+            self._ch_hist_tree.column(col, width=w, anchor="center")
+        self._ch_hist_tree.tag_configure("win",  foreground=_GREEN)
+        self._ch_hist_tree.tag_configure("fail", foreground=_RED)
+        self._ch_hist_tree.pack(fill="x")
+
+        self._update_achievements_tab()
+        return frame
+
+    def _update_achievements_tab(self) -> None:
+        """Refresh the achievement cards and challenge history."""
+        unlocked = self._achievements.unlocked_keys
+        total    = len(ACHIEVEMENTS)
+        count    = len(unlocked)
+        self._ach_progress_var.set(
+            f"{count} / {total} unlocked  ({round(count/total*100) if total else 0}%)"
+        )
+
+        # Rebuild cards
+        for w in self._ach_inner.winfo_children():
+            w.destroy()
+
+        cols = 4
+        for idx, ach in enumerate(ACHIEVEMENTS):
+            row_n, col_n = divmod(idx, cols)
+            locked  = ach.key not in unlocked
+            card_bg = _PANEL if not locked else _CARD
+            fg_main = _FG   if not locked else _FG2
+
+            card = tk.Frame(self._ach_inner, bg=card_bg, padx=10, pady=8,
+                            highlightbackground=(_GOLD if not locked else "#2a2a4a"),
+                            highlightthickness=1)
+            card.grid(row=row_n, column=col_n, padx=5, pady=4, sticky="nsew")
+            self._ach_inner.columnconfigure(col_n, weight=1)
+
+            top = tk.Frame(card, bg=card_bg)
+            top.pack(fill="x")
+            tk.Label(top, text=ach.icon if not locked else "🔒",
+                     bg=card_bg, fg=_GOLD if not locked else _FG2,
+                     font=("Helvetica", 16)).pack(side="left", padx=(0, 6))
+            tk.Label(top, text=ach.title, bg=card_bg,
+                     fg=fg_main, font=FONT_BOLD9).pack(side="left", anchor="w")
+            tk.Label(card, text=ach.description, bg=card_bg,
+                     fg=_FG2, font=FONT_SMALL,
+                     wraplength=160, justify="left").pack(anchor="w")
+            if ach.reward > 0:
+                tk.Label(card, text=f"+${ach.reward:,.0f} AUD",
+                         bg=card_bg,
+                         fg=(_GREEN if not locked else _FG2),
+                         font=FONT_SMALL).pack(anchor="w")
+
+        # Challenge history
+        for item in self._ch_hist_tree.get_children():
+            self._ch_hist_tree.delete(item)
+        for ch in self._challenges.recent_history:
+            result = "✅ Done" if ch.completed else "❌ Failed"
+            tag    = "win" if ch.completed else "fail"
+            self._ch_hist_tree.insert(
+                "", "end",
+                values=(ch.day, ch.title, f"${ch.reward:,.0f}", result),
+                tags=(tag,))
+
+    # ==================================================================
     # Refresh logic
     # ==================================================================
 
@@ -1266,6 +1624,26 @@ class OzZooGUI:
         self._update_header()
         self._update_dashboard()
         self._root.after(self._REFRESH_MS, self._schedule_refresh)
+
+    def _schedule_ticker(self) -> None:
+        """Scroll one character of the ticker message."""
+        if not self._ticker_msgs:
+            self._root.after(self._TICKER_DELAY * 10, self._schedule_ticker)
+            return
+        full = "  ◆  ".join(self._ticker_msgs)
+        # Rotate by _ticker_pos
+        idx = self._ticker_pos % len(full)
+        display = full[idx:] + "   " + full[:idx]
+        # Show only up to 80 chars so it fits
+        self._ticker_var.set(display[:self._TICKER_WIDTH])
+        self._ticker_pos = (self._ticker_pos + 1) % len(full)
+        self._root.after(self._TICKER_DELAY, self._schedule_ticker)
+
+    def _push_ticker(self, msg: str) -> None:
+        """Add a new message to the news ticker (keeps last 8)."""
+        self._ticker_msgs.append(msg)
+        if len(self._ticker_msgs) > 8:
+            self._ticker_msgs.pop(0)
 
     def _refresh(self) -> None:
         self._update_header()
@@ -1275,6 +1653,7 @@ class OzZooGUI:
         self._update_resources_bars()
         self._update_finances()
         self._update_eventlog()
+        self._update_achievements_tab()
 
     def _update_header(self) -> None:
         zoo = self._zoo
@@ -1285,6 +1664,10 @@ class OzZooGUI:
             f"Animals: {len(zoo.get_alive_animals())}"
         )
         self._score_var.set(f"Score: {zoo.score}")
+        self._stars_var.set(f"  {_stars(zoo.score)}")
+        pb = self._best_score
+        if pb > 0:
+            self._best_var.set(f"Best: {pb}")
 
     def _update_dashboard(self) -> None:
         zoo   = self._zoo
@@ -1316,6 +1699,38 @@ class OzZooGUI:
         for k, v in stats.items():
             if k in self._dash_stat_vars:
                 self._dash_stat_vars[k].set(v)
+
+        # Streak + personal best
+        streak = self._achievements.stats.get("no_death_streak", 0)
+        self._dash_streak_var.set(
+            f"🔥 No-death streak: {streak} day{'s' if streak != 1 else ''}"
+            + (" 🏆" if streak >= 10 else "")
+        )
+        self._dash_best_var.set(f"⭐ Personal best score: {self._best_score}")
+
+        # Challenge display
+        ch = self._current_challenge
+        if ch is None and self._challenge_result is None:
+            self._challenge_icon_var.set("—")
+            self._challenge_title_var.set("Advance the day to get a challenge!")
+            self._challenge_desc_var.set("")
+            self._challenge_status_var.set("")
+        elif ch is not None:
+            self._challenge_icon_var.set(ch.icon)
+            self._challenge_title_var.set(ch.title)
+            self._challenge_desc_var.set(ch.description + f"  |  Reward: +${ch.reward:,.0f} AUD")
+            self._challenge_status_var.set("⏳ In progress — advance the day to complete!")
+            self._challenge_status_lbl.config(fg=_YELLOW)
+        if self._challenge_result is not None:
+            success, reward = self._challenge_result
+            if success:
+                self._challenge_status_var.set(
+                    f"✅ Completed! +${reward:,.0f} AUD earned!"
+                )
+                self._challenge_status_lbl.config(fg=_GREEN)
+            else:
+                self._challenge_status_var.set("❌ Challenge failed. Try again tomorrow!")
+                self._challenge_status_lbl.config(fg=_RED)
 
     def _update_animals_tree(self) -> None:
         tree = self._anim_tree
@@ -1526,10 +1941,110 @@ class OzZooGUI:
     # ==================================================================
 
     def _do_advance_day(self) -> None:
+        # 1) Generate today's challenge BEFORE ticking (so description is visible)
+        if self._current_challenge is None:
+            self._current_challenge = self._challenges.generate_for_day(
+                self._zoo.day + 1
+            )
+
+        prev_score    = self._zoo.score
+        alive_before  = set(a.name for a in self._zoo.get_alive_animals())
+
         report = self._loop.tick()
+
+        # 2) Compute day summary for challenge/achievement evaluation
+        alive_after  = set(a.name for a in self._zoo.get_alive_animals())
+        deaths_today = len(alive_before - alive_after)
+        today_vis    = len(self._zoo.daily_visitors)
+        today_rev    = today_vis * self._zoo.ticket_price
+        score_inc    = self._zoo.score > prev_score
+
+        day_summary = {
+            "deaths_today":    deaths_today,
+            "today_visitors":  today_vis,
+            "today_revenue":   today_rev,
+            "score_increased": score_inc,
+        }
+
+        # 3) Update achievement stats
+        self._achievements.record_today_visitors(today_vis)
+        self._achievements.update_daily_streaks(self._zoo)
+        self._achievements.update_no_death_streak(deaths_today)
+
+        # 4) Evaluate daily challenge
+        ch_success, ch_reward = self._challenges.evaluate_current(
+            self._zoo, day_summary
+        )
+        self._challenge_result = (ch_success, ch_reward)
+        if ch_success and ch_reward > 0:
+            self._zoo.finance.add_income(
+                ch_reward, "challenge", f"Challenge reward: Day {self._zoo.day}"
+            )
+            self._push_ticker(
+                f"🎯 Challenge COMPLETE! +${ch_reward:,.0f} AUD earned!"
+            )
+
+        # 5) Check achievements — fire toasts for newly unlocked ones
+        newly = self._achievements.check_all(self._zoo)
+        for ach in newly:
+            if ach.reward > 0:
+                self._zoo.finance.add_income(
+                    ach.reward, "achievement",
+                    f"Achievement reward: {ach.title}"
+                )
+            msg = f"{ach.icon}  Achievement unlocked: {ach.title}!"
+            _Toast.show(self._root, msg, colour=_GOLD)
+            self._push_ticker(msg)
+
+        # 6) No-death streak bonus (every 5 clean days)
+        streak = self._achievements.stats.get("no_death_streak", 0)
+        if streak > 0 and streak % 5 == 0:
+            bonus = streak * 50.0
+            self._zoo.finance.add_income(
+                bonus, "streak_bonus",
+                f"{streak}-day no-death streak bonus"
+            )
+            _Toast.show(
+                self._root,
+                f"🔥 {streak}-day streak bonus! +${bonus:,.0f} AUD",
+                colour=_CYAN,
+            )
+            self._push_ticker(f"🔥 {streak}-day no-death streak! +${bonus:,.0f} AUD bonus!")
+
+        # 7) Personal best tracking
+        if self._zoo.score > self._best_score:
+            old_best = self._best_score
+            self._best_score = self._zoo.score
+            if old_best > 0:
+                _Toast.show(
+                    self._root,
+                    f"⭐ New personal best: {self._best_score}!",
+                    colour=_YELLOW,
+                )
+                self._push_ticker(f"⭐ New personal best score: {self._best_score}!")
+
+        # 8) Generate tomorrow's challenge ready for display
+        self._current_challenge = self._challenges.generate_for_day(
+            self._zoo.day + 1
+        )
+
+        # 9) Push random-event / report highlights to ticker
+        if "heatwave" in report.lower():
+            self._push_ticker("🌡️ Heatwave hit the zoo! Medicate animals!")
+        elif "celebration" in report.lower():
+            self._push_ticker("🎉 Zoo Celebration! Crowds and donations!")
+        elif "escape" in report.lower():
+            self._push_ticker("🚨 Animal escaped! Recapture costs incurred.")
+        elif "outbreak" in report.lower():
+            self._push_ticker("🦠 Disease Outbreak! Check your animals now!")
+        elif "donation" in report.lower():
+            self._push_ticker("💝 Generous donation received!")
+        elif "baby" in report.lower() or "born" in report.lower():
+            self._push_ticker("🍼 New baby born at OzZoo!")
+
         self._refresh()
 
-        # Accumulate report lines into our event history
+        # 10) Accumulate report lines into event history
         day = self._zoo.day
         self._event_lines.append(f"{'─' * 55}")
         self._event_lines.append(f"📅  Day {day} — Daily Report")
@@ -1538,16 +2053,16 @@ class OzZooGUI:
             stripped = line.strip()
             if stripped and stripped not in ("─" * 50, "─" * 55):
                 self._event_lines.append(line)
-        # Also capture any observer events logged today
         for entry in self._zoo.event_logger.get_all_entries():
-            ts = entry["timestamp"][:10]
-            et = entry["event_type"].upper()
+            ts  = entry["timestamp"][:10]
+            et  = entry["event_type"].upper()
             msg = entry["data"].get("message") or str(entry["data"])
             self._event_lines.append(f"[{ts}] {et}: {msg}")
-        self._zoo.event_logger.clear()   # don't double-show on next refresh
+        self._zoo.event_logger.clear()
 
         self._update_eventlog()
 
+        # 11) Daily report popup (colour-coded)
         dlg = tk.Toplevel(self._root)
         dlg.title(f"📅  Day {self._zoo.day} — Daily Report")
         dlg.configure(bg=_BG)
@@ -1559,8 +2074,23 @@ class OzZooGUI:
                  bg=_ACCENT, fg=_GOLD, font=FONT_HEAD).pack()
         bal = self._zoo.finance.get_balance()
         tk.Label(hdr,
-                 text=f"Balance: ${bal:,.2f} AUD  ·  Score: {self._zoo.score}",
+                 text=f"Balance: ${bal:,.2f} AUD  ·  Score: {self._zoo.score}"
+                      f"  {_stars(self._zoo.score)}",
                  bg=_ACCENT, fg=_FG, font=FONT_BODY).pack()
+
+        # Challenge result banner inside the popup
+        if self._challenge_result is not None:
+            success, reward = self._challenge_result
+            banner_bg = "#1b4a1b" if success else "#4a1b1b"
+            banner_fg = _GREEN   if success else _RED
+            banner_txt = (
+                f"🎯 Challenge: {'✅ COMPLETE' if success else '❌ FAILED'}"
+                + (f" (+${reward:,.0f} AUD)" if success else "")
+            )
+            banner = tk.Frame(dlg, bg=banner_bg, pady=6)
+            banner.pack(fill="x")
+            tk.Label(banner, text=banner_txt, bg=banner_bg,
+                     fg=banner_fg, font=FONT_BOLD9).pack()
 
         txt = tk.Text(dlg, bg=_PANEL, fg=_FG, insertbackground=_FG,
                       relief="flat", font=FONT_MONO, width=64, height=22,
@@ -1601,6 +2131,7 @@ class OzZooGUI:
             return
         try:
             msg = self._zoo.feed_animal(name)
+            self._achievements.record_feed()
             messagebox.showinfo("Feed Animal", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
@@ -1678,6 +2209,7 @@ class OzZooGUI:
             return
         try:
             msg = self._zoo.upgrade_enclosure(enc_id)
+            self._achievements.record_upgrade()
             messagebox.showinfo("Upgrade", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
@@ -1690,6 +2222,7 @@ class OzZooGUI:
         name, habitat, cap, area = dlg.result
         try:
             msg = self._zoo.build_enclosure(name, habitat, cap, area)
+            self._achievements.record_build()
             messagebox.showinfo("Build Enclosure", msg)
         except OzZooException as exc:
             messagebox.showerror("Error", str(exc))
@@ -1761,6 +2294,11 @@ class OzZooGUI:
     def _do_save(self) -> None:
         try:
             data = self._zoo.to_dict()
+            # Persist addictive-gameplay state
+            data["_achievements"] = self._achievements.to_dict()
+            data["_challenges"]   = self._challenges.to_dict()
+            data["_best_score"]   = self._best_score
+            data["_no_death_streak"] = self._achievements.stats.get("no_death_streak", 0)
             with open(SAVE_FILE, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
             messagebox.showinfo("Save Game", f"Game saved to '{SAVE_FILE}'.")
@@ -1783,19 +2321,34 @@ class OzZooGUI:
             self._zoo = Zoo(name=data.get("name", "OzZoo"))
             self._zoo.from_dict(data)
             self._loop = GameLoop(self._zoo)
-            self._event_lines = []   # clear accumulated events on load
+            self._event_lines   = []
+            self._best_score    = data.get("_best_score", 0)
+            self._current_challenge  = None
+            self._challenge_result   = None
+            self._achievements.from_dict(data.get("_achievements", {}))
+            self._challenges.from_dict(data.get("_challenges",   {}))
             self._refresh()
             messagebox.showinfo("Load Game", f"Game loaded from '{SAVE_FILE}'.")
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
+
+    def _do_achievements(self) -> None:
+        """Open the Achievements gallery dialog."""
+        _AchievementsDialog(self._root, self._achievements)
 
     def _do_help(self) -> None:
         """Open the How to Play dialog."""
         _HelpDialog(self._root)
 
     def _do_quit(self) -> None:
-        if messagebox.askyesno("Quit OzZoo",
-                               f"Are you sure?\n\nFinal score: {self._zoo.score}"):
+        stars = _stars(self._zoo.score)
+        if messagebox.askyesno(
+            "Quit OzZoo",
+            f"Are you sure?\n\n"
+            f"Final score: {self._zoo.score}  {stars}\n"
+            f"Personal best: {self._best_score}\n"
+            f"Achievements: {self._achievements.unlocked_count}/{self._achievements.total_count}",
+        ):
             self._root.quit()
 
 

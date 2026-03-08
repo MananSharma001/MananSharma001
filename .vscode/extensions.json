@@ -1,0 +1,14 @@
+{
+  // Recommended VS Code extensions for working on the OzZoo project.
+  // VS Code will prompt you to install these when you open the workspace.
+  "recommendations": [
+    // Python language support (IntelliSense, linting, debugging)
+    "ms-python.python",
+    // Pylance — fast, feature-rich type-checking and auto-complete
+    "ms-python.vscode-pylance",
+    // Black formatter (optional — used in settings.json)
+    "ms-python.black-formatter",
+    // Markdown preview for README / design_notes
+    "yzhang.markdown-all-in-one"
+  ]
+}

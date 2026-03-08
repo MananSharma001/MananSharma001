@@ -140,6 +140,10 @@ class _BuyAnimalDialog(tk.Toplevel):
         species_list = AnimalFactory.supported_species()
 
         tk.Label(self, text="Buy New Animal 🐾", bg=_BG, fg=_GOLD,
+                 font=("Helvetica", 13, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(14, 8), padx=20)
+
+        tk.Label(self, text="Species:", bg=_BG, fg=_FG).grid(
             row=1, column=0, sticky="e", padx=10, pady=4)
         self._species_var = tk.StringVar(value=species_list[0])
         ttk.Combobox(self, textvariable=self._species_var, values=species_list,

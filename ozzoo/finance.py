@@ -193,17 +193,17 @@ class Finance:
 
         return (
             "=" * 50 + "\n"
-            "        💰 FINANCIAL REPORT (AUD)\n"
-            "=" * 50 + "\n"
-            f"  Current Balance : ${self.__balance:>12,.2f}\n"
-            f"  Total Income    : ${self._total_income:>12,.2f}\n"
-            f"  Total Expenses  : ${self._total_expenses:>12,.2f}\n"
-            "─" * 50 + "\n"
-            "  Recent Income:\n"
-            f"{income_lines}\n"
-            "  Recent Expenses:\n"
-            f"{expense_lines}\n"
-            "=" * 50
+            + "        💰 FINANCIAL REPORT (AUD)\n"
+            + "=" * 50 + "\n"
+            + f"  Current Balance : ${self.__balance:>12,.2f}\n"
+            + f"  Total Income    : ${self._total_income:>12,.2f}\n"
+            + f"  Total Expenses  : ${self._total_expenses:>12,.2f}\n"
+            + "─" * 50 + "\n"
+            + "  Recent Income:\n"
+            + f"{income_lines}\n"
+            + "  Recent Expenses:\n"
+            + f"{expense_lines}\n"
+            + "=" * 50
         )
 
     def get_income_by_source(self) -> Dict[str, float]:

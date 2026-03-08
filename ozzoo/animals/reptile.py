@@ -41,7 +41,7 @@ class Reptile(Animal):
 
     def __init__(
         self,
-        name : str,
+        name: str,
         species: str,
         age: int,
         habitat_type: str,
